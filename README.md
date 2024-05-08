@@ -88,9 +88,9 @@ https://developer.qualcomm.com/software/hexagon-dsp-sdk
 ## Build & Installation
 
 ```
-git clone https://git.codelinaro.org/linaro/qcomlt/fastrpc 
-cd fastrpc 
-./gitcompile 
+git clone https://github.com/quichub/fastrpc
+cd fastrpc
+./gitcompile
 sudo make install
 ```
 
