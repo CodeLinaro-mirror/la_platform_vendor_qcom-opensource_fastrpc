@@ -24,7 +24,6 @@
 #define FASTRPC_IOCTL_INIT_CREATE_STATIC	_IOWR('R', 9, struct fastrpc_ioctl_init_create_static)
 #define FASTRPC_IOCTL_MEM_MAP			_IOWR('R', 10, struct fastrpc_ioctl_mem_map)
 #define FASTRPC_IOCTL_MEM_UNMAP			_IOWR('R', 11, struct fastrpc_ioctl_mem_unmap)
-#define FASTRPC_IOCTL_MULTIMODE_INVOKE		_IOWR('R', 12, struct fastrpc_ioctl_multimode_invoke)
 #define FASTRPC_IOCTL_GET_DSP_INFO		_IOWR('R', 13, struct fastrpc_ioctl_capability)
 
 #define ADSPRPC_DEVICE "/dev/fastrpc-adsp"
@@ -169,8 +168,6 @@ struct fastrpc_ioctl_capability {
 	__u32 reserved[4];
 };
 
-//New ioctl structures
-
 struct fastrpc_ioctl_control {
 	__u32 req;
 	union {
@@ -180,61 +177,6 @@ struct fastrpc_ioctl_control {
 		struct fastrpc_ctrl_wakelock wl;
 		struct fastrpc_ctrl_pm pm;
 	};
-};
-
-// Notification worker thread response structure
-struct fastrpc_ioctl_notif_response {
-	int domain;						// Domain of User PD
-	int session;					// Session ID of User PD
-	__u32 status;				// Status of DSP User PD
-};
-
-
-
-struct fastrpc_ioctl_signal {
-	int req; /* type of signal request*/
-	__u32 signal_id; /* signal id*/
-	union {
-		__u32 timeout_usec;
-		__u32 flags;
-	};
-};
-
-struct fastrpc_enhanced_invoke {
-	struct fastrpc_ioctl_invoke inv;
-	__u64 crc;
-	__u64 perf_kernel;
-	__u64 perf_dsp;
-	__u32 reserved[8];
-};
-
-struct fastrpc_ioctl_multimode_invoke {
-	__u32 req;
-	__u32 rsvd;
-	__u64 invparam;
-	__u64 size;
-	__u32 reserved[8];
-};
-
-/* multimode invoke type */
-enum fastrpc_multimode_invoke_type {
-	FASTRPC_INVOKE			= 1,
-	FASTRPC_INVOKE_ENHANCED_INVOKE	= 2,
-	FASTRPC_INVOKE_CONTROL = 3,
-	FASTRPC_INVOKE_DSPSIGNAL = 4,
-	FASTRPC_INVOKE_NOTIF = 5,
-	FASTRPC_INVOKE_MULTISESSION = 6,
-	FASTRPC_INVOKE_CONFIG = 7,
-	FASTRPC_INVOKE_SESSIONINFO = 8,
-};
-
-/* types of signal request*/
-enum fastrpc_dspsignal_type {
-	FASTRPC_DSPSIGNAL_SIGNAL = 1,
-	FASTRPC_DSPSIGNAL_WAIT = 2,
-	FASTRPC_DSPSIGNAL_CREATE = 3,
-	FASTRPC_DSPSIGNAL_DESTROY = 4,
-	FASTRPC_DSPSIGNAL_CANCEL_WAIT = 5,
 };
 
 #endif // FASTRPC_INTERNAL_H

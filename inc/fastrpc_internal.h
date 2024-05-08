@@ -624,10 +624,6 @@ int ioctl_optimization(int dev, uint32_t max_concurrency);
 const char* get_secure_domain_name(int domain_id);
 int is_async_fastrpc_supported(void);
 
-//Keep this in the end as these files have dependencies on this file
-#ifdef ENABLE_UPSTREAM_DRIVER_INTERFACE
 #include "fastrpc_ioctl.h"
-#else
-#include "fastrpc_ioctl_internal.h"
-#endif
+
 #endif // FASTRPC_INTERNAL_H
