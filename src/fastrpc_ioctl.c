@@ -86,25 +86,15 @@ int ioctl_invoke(int dev, int req, remote_handle handle, uint32_t sc, void *pra,
                  uint64_t *perf_kernel, uint64_t *perf_dsp) {
   int ioErr = AEE_SUCCESS;
   struct fastrpc_ioctl_invoke invoke = {0};
-  struct fastrpc_enhanced_invoke invoke2 = {0};
-  struct fastrpc_ioctl_multimode_invoke ioctl_inv2 = {0};
 
   invoke.handle = handle;
   invoke.sc = sc;
   invoke.args = (uint64_t)pra;
-  if (req >= INVOKE && req <= INVOKE_FD) {
+  if (req >= INVOKE && req <= INVOKE_FD)
     ioErr = ioctl(dev, FASTRPC_IOCTL_INVOKE, (unsigned long)&invoke);
-  } else {
-    invoke2.inv = invoke;
-    invoke2.crc = (uint64_t)crc;
-    invoke2.perf_kernel = (uint64_t)perf_kernel;
-    invoke2.perf_dsp = (uint64_t)perf_dsp;
-    ioctl_inv2.req = FASTRPC_INVOKE_ENHANCED_INVOKE;
-    ioctl_inv2.invparam = (uintptr_t)&invoke2;
-    ioctl_inv2.size = sizeof(struct fastrpc_enhanced_invoke);
-    ioErr =
-        ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, (unsigned long)&ioctl_inv2);
-  }
+  else
+    return AEE_EUNSUPPORTED;
+
   return ioErr;
 }
 
@@ -115,19 +105,7 @@ int ioctl_invoke2_response(int dev, fastrpc_async_jobid *jobid,
 }
 
 int ioctl_invoke2_notif(int dev, int *domain, int *session, int *status) {
-  int ioErr = AEE_SUCCESS;
-  struct fastrpc_ioctl_multimode_invoke invoke2 = {0};
-  struct fastrpc_ioctl_notif_response notif = {0};
-
-  invoke2.req = FASTRPC_INVOKE_NOTIF;
-  invoke2.invparam = (uintptr_t)&notif;
-  invoke2.size = sizeof(struct fastrpc_ioctl_notif_response);
-  ioErr = ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, (unsigned long)&invoke2);
-  *domain = notif.domain;
-  *session = notif.session;
-  *status = notif.status;
-
-  return ioErr;
+  return AEE_EUNSUPPORTED;
 }
 
 int ioctl_mmap(int dev, int req, uint32_t flags, int attr, int fd, int offset,
@@ -221,68 +199,11 @@ int ioctl_getdspinfo(int dev, int domain, uint32_t attr, uint32_t *capability) {
 }
 
 int ioctl_setmode(int dev, int mode) {
-  struct fastrpc_ioctl_multimode_invoke ioctl_invk2;
-
-  if (mode == FASTRPC_SESSION_ID1) {
-    ioctl_invk2.req = FASTRPC_INVOKE_MULTISESSION;
-    ioctl_invk2.invparam = (__u64)(uintptr_t)&mode;
-    ioctl_invk2.size = sizeof(uint32_t);
-    return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, &ioctl_invk2);
-  }
   return AEE_EUNSUPPORTED;
 }
 
 int ioctl_control(int dev, int req, void *c) {
-  int ioErr = AEE_SUCCESS;
-  struct fastrpc_ioctl_control ctrl = {0};
-  struct fastrpc_ctrl_kalloc *kalloc;
-  struct fastrpc_ioctl_multimode_invoke ioctl_invk2;
-
-  switch (req) {
-  case DSPRPC_SET_MODE:
-    FARF(ERROR, "Deprecated performance mode\n");
-    ioErr = AEE_SUCCESS;
-    return ioErr;
-  case DSPRPC_CONTROL_LATENCY:
-    ctrl.lp = *(struct fastrpc_ctrl_latency *)c;
-    ctrl.req = FASTRPC_CONTROL_LATENCY;
-    break;
-  case DSPRPC_SMMU_SUPPORT:
-    ctrl.smmu = *(struct fastrpc_ctrl_smmu *)c;
-    ctrl.req = FASTRPC_CONTROL_SMMU;
-    break;
-  case DSPRPC_KALLOC_SUPPORT:
-    kalloc = (struct fastrpc_ctrl_kalloc *)c;
-    kalloc->kalloc_support = 1;
-    return ioErr;
-    break;
-  case DSPRPC_CONTROL_WAKELOCK:
-    ctrl.wl = *(struct fastrpc_ctrl_wakelock *)c;
-    ctrl.req = FASTRPC_CONTROL_WAKELOCK;
-    break;
-  case DSPRPC_PM:
-    ctrl.pm = *(struct fastrpc_ctrl_pm *)c;
-    ctrl.req = FASTRPC_CONTROL_PM;
-    break;
-  case DSPRPC_RPC_POLL:
-    ctrl.lp = *(struct fastrpc_ctrl_latency *)c;
-    ctrl.req = FASTRPC_CONTROL_RPC_POLL;
-    break;
-  case DSPRPC_ASYNC_WAKE:
-  case DSPRPC_NOTIF_WAKE:
-    break;
-  case DSPRPC_REMOTE_PROCESS_KILL:
-    ctrl.req = FASTRPC_REMOTE_PROCESS_KILL;
-    break;
-  default:
-    FARF(ERROR, "ERROR: %s Invalid request passed %d", __func__, req);
-    ioErr = AEE_EBADPARM;
-    break;
-  }
-  ioctl_invk2.req = FASTRPC_INVOKE_CONTROL;
-  ioctl_invk2.invparam = (__u64)(uintptr_t)&ctrl;
-  ioctl_invk2.size = sizeof(struct fastrpc_ioctl_control);
-  return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, &ioctl_invk2);
+  return AEE_EUNSUPPORTED;
 }
 
 int ioctl_getperf(int dev, int key, void *data, int *datalen) {
@@ -290,109 +211,34 @@ int ioctl_getperf(int dev, int key, void *data, int *datalen) {
 }
 
 int ioctl_signal_create(int dev, uint32_t signal, uint32_t flags) {
-
-  struct fastrpc_ioctl_multimode_invoke ioctl_invk2;
-  struct fastrpc_ioctl_signal fsig;
-
-  fsig.req = FASTRPC_DSPSIGNAL_CREATE;
-  fsig.signal_id = signal;
-  fsig.flags = flags;
-
-  ioctl_invk2.req = FASTRPC_INVOKE_DSPSIGNAL;
-  ioctl_invk2.invparam = (__u64)(uintptr_t)&fsig;
-  ioctl_invk2.size = sizeof(struct fastrpc_ioctl_signal);
-
-  return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, &ioctl_invk2);
+  return AEE_EUNSUPPORTED;
 }
 
 int ioctl_signal_destroy(int dev, uint32_t signal) {
-
-  struct fastrpc_ioctl_multimode_invoke ioctl_invk2;
-  struct fastrpc_ioctl_signal fsig;
-
-  fsig.req = FASTRPC_DSPSIGNAL_DESTROY;
-  fsig.signal_id = signal;
-
-  ioctl_invk2.req = FASTRPC_INVOKE_DSPSIGNAL;
-  ioctl_invk2.invparam = (__u64)(uintptr_t)&fsig;
-  ioctl_invk2.size = sizeof(struct fastrpc_ioctl_signal);
-
-  return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, &ioctl_invk2);
+  return AEE_EUNSUPPORTED;
 }
 
 int ioctl_signal_signal(int dev, uint32_t signal) {
-
-  struct fastrpc_ioctl_multimode_invoke ioctl_invk2;
-  struct fastrpc_ioctl_signal fsig;
-
-  fsig.req = FASTRPC_DSPSIGNAL_SIGNAL;
-  fsig.signal_id = signal;
-
-  ioctl_invk2.req = FASTRPC_INVOKE_DSPSIGNAL;
-  ioctl_invk2.invparam = (__u64)(uintptr_t)&fsig;
-  ioctl_invk2.size = sizeof(struct fastrpc_ioctl_signal);
-
-  return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, &ioctl_invk2);
+  return AEE_EUNSUPPORTED;
 }
 
 int ioctl_signal_wait(int dev, uint32_t signal, uint32_t timeout_usec) {
-  struct fastrpc_ioctl_multimode_invoke ioctl_invk2;
-  struct fastrpc_ioctl_signal fsig;
-
-  fsig.req = FASTRPC_DSPSIGNAL_WAIT;
-  fsig.signal_id = signal;
-  fsig.timeout_usec = timeout_usec;
-
-  ioctl_invk2.req = FASTRPC_INVOKE_DSPSIGNAL;
-  ioctl_invk2.invparam = (__u64)(uintptr_t)&fsig;
-  ioctl_invk2.size = sizeof(struct fastrpc_ioctl_signal);
-
-  return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, &ioctl_invk2);
+  return AEE_EUNSUPPORTED;
 }
 
 int ioctl_signal_cancel_wait(int dev, uint32_t signal) {
-
-  struct fastrpc_ioctl_multimode_invoke ioctl_invk2;
-  struct fastrpc_ioctl_signal fsig;
-
-  fsig.req = FASTRPC_DSPSIGNAL_CANCEL_WAIT;
-  fsig.signal_id = signal;
-
-  ioctl_invk2.req = FASTRPC_INVOKE_DSPSIGNAL;
-  ioctl_invk2.invparam = (__u64)(uintptr_t)&fsig;
-  ioctl_invk2.size = sizeof(struct fastrpc_ioctl_signal);
-
-  return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, &ioctl_invk2);
+  return AEE_EUNSUPPORTED;
 }
 
 int ioctl_sharedbuf(int dev,
                     struct fastrpc_proc_sharedbuf_info *sharedbuf_info) {
-  struct fastrpc_ioctl_multimode_invoke invoke2 = {0};
-
-  invoke2.req = FASTRPC_INVOKE_CONFIG;
-  invoke2.invparam = (uintptr_t)sharedbuf_info;
-  invoke2.size = sizeof(struct fastrpc_proc_sharedbuf_info);
-
-  return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, (unsigned long)&invoke2);
+  return AEE_EUNSUPPORTED;
 }
 
 int ioctl_session_info(int dev, struct fastrpc_proc_sess_info *sess_info) {
-  struct fastrpc_ioctl_multimode_invoke invoke2 = {0};
-
-  invoke2.req = FASTRPC_INVOKE_SESSIONINFO;
-  invoke2.invparam = (uintptr_t)sess_info;
-  invoke2.size = sizeof(struct fastrpc_proc_sess_info);
-
-  sess_info->domain_id = 1;
-  return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, (unsigned long)&invoke2);
+  return AEE_EUNSUPPORTED;
 }
 
 int ioctl_optimization(int dev, uint32_t max_concurrency) {
-  struct fastrpc_ioctl_multimode_invoke invoke2;
-
-  std_memset(&invoke2, 0, sizeof(invoke2));
-  invoke2.req = FASTRPC_INVOKE2_KERNEL_OPTIMIZATIONS;
-  invoke2.invparam = (uintptr_t)&max_concurrency;
-  invoke2.size = sizeof(uint32_t);
-  return ioctl(dev, FASTRPC_IOCTL_MULTIMODE_INVOKE, (unsigned long)&invoke2);
+  return AEE_EUNSUPPORTED;
 }
