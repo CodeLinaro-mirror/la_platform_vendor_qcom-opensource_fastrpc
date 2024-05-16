@@ -1,10 +1,12 @@
 // Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 
+#ifndef __ADSPMSGD_INTERNAL__
+#define __ADSPMSGD_INTERNAL__
+
 #include <stdio.h>
 #include <stdbool.h>
 #include <pthread.h>
-int adspmsgd_init(remote_handle64 handle, int filter);
 
 typedef void* (*reader_thread)();
 
@@ -20,6 +22,20 @@ typedef struct {
   FILE *log_file_fd; // file descriptor to save runtime farf logs
 } msgd;
 
+/**
+  * @brief API to initialize adspmsgd module
+  * Initializes data structures and global variables in this module
+  */
+int adspmsgd_init(remote_handle64 handle, int filter);
+/**
+  * @brief API to log a new message in adspmsgd
+  * Sends the new message to stdout/any other logging mechanism available on the system
+  */
 void adspmsgd_log_message(char *format, char *msg);
+/**
+  * @brief API to stop running this module
+  * after calling this API, no new messages will be logged in the system.
+  */
 void adspmsgd_stop(int);
 
+#endif /* __ADSPMSGD_INTERNAL__ */

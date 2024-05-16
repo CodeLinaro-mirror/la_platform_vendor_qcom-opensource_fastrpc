@@ -38,8 +38,6 @@ struct fastrpc_latency {
  * return, fastrpc error codes
  */
 int fastrpc_latency_invoke_incr(struct fastrpc_latency *qos);
-int fastrpc_latency_init(int dev, struct fastrpc_latency *qos);
-int fastrpc_latency_deinit(struct fastrpc_latency *qos);
 
 /* Set qos enable and latency parameters for a configured domain
  * @param qos, pointer to domain latency data
@@ -49,5 +47,10 @@ int fastrpc_latency_deinit(struct fastrpc_latency *qos);
  */
 int fastrpc_set_pm_qos(struct fastrpc_latency *qos, uint32_t enable,
                        uint32_t latency);
+
+/* Initialization routine to initialize globals & internal data structures */
+int fastrpc_latency_init(int dev, struct fastrpc_latency *qos);
+/* De-init routine to cleanup globals & internal data structures*/
+int fastrpc_latency_deinit(struct fastrpc_latency *qos);
 
 #endif /*__FASTRPC_LATENCY_H__*/

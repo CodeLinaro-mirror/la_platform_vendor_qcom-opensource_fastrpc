@@ -14,6 +14,8 @@ extern "C" {
  */
 
 /**
+ * @file adsp_pls
+ * 
  * adsp process local storage is local storage for the fastrpc hlos
  * process context.
 

@@ -125,13 +125,4 @@ int get_unsigned_pd_attribute(uint32 domain, int *unsigned_module);
  */
 int is_userspace_allocation_supported();
 
-
-/* Allocate and return local handles for the remote constant handles */
-remote_handle64 get_adsp_listener1_handle(int domain);
-remote_handle64 get_adsp_current_process1_handle(int domain);
-remote_handle64 get_adspmsgd_adsp1_handle(int domain);
-remote_handle64 get_remotectl1_handle(int domain);
-remote_handle64 get_adsp_perf1_handle(int domain);
-
-
 #endif //FASTRPC_ANDROID_USER_H

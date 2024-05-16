@@ -40,9 +40,6 @@ struct fastrpc_async_job {
 	uint32_t reserved; // reserved
 };
 
-int fastrpc_async_domain_init(int domain);
-void fastrpc_async_domain_deinit(int domain);
-
 /*
  * Internal function to save async job information before submitting to DSP
  * @ domain: domain to which Async job is submitted
@@ -62,4 +59,15 @@ int fastrpc_save_async_job(int domain, struct fastrpc_async_job *asyncjob, fastr
  *
  */
 int fastrpc_remove_async_job(fastrpc_async_jobid jobid, boolean dsp_invoke_done);
+
+/*
+ * API to initialize async module data strcutures and globals
+ */
+int fastrpc_async_domain_init(int domain);
+
+/*
+ * API to de-initialize async module data strcutures and globals
+ */
+void fastrpc_async_domain_deinit(int domain);
+
 #endif // FASTRPC_ASYNC_H

@@ -43,8 +43,8 @@
 
 bool is_kernel_perf_enabled();
 bool is_dsp_perf_enabled(int domain);
-int fastrpc_perf_init(int dev, int domain);
 void fastrpc_perf_update(int dev, remote_handle handle, uint32_t sc);
+int fastrpc_perf_init(int dev, int domain);
 void fastrpc_perf_deinit(void);
 
 #endif //FASTRPC_PERF_H

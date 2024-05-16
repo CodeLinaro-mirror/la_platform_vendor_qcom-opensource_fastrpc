@@ -6,16 +6,21 @@
 
 #include "apps_std.h"
 
-/*
- * Macros defined for environment search paths
- *
- */
+/**
+  * @brief Macros used in apps_std
+  * defines the search paths where fastRPC library should 
+  * look for skel libraries, .debugconfig, .farf files.  
+  * Could be overloaded from build system.
+  **/
+ 
 #define RETRY_WRITE (3) // number of times to retry write operation
 
+// Environment variable name, that can be used to override the search paths
 #define ADSP_LIBRARY_PATH "ADSP_LIBRARY_PATH"
 #define DSP_LIBRARY_PATH "DSP_LIBRARY_PATH"
 #define ADSP_AVS_PATH "ADSP_AVS_CFG_PATH"
 
+// Locations where shell file can be found
 #ifndef ENABLE_UPSTREAM_DRIVER_INTERFACE
 #ifndef DSP_MOUNT_LOCATION
 #define DSP_MOUNT_LOCATION "/dsp/"
@@ -23,14 +28,15 @@
 #ifndef DSP_DOM_LOCATION
 #define DSP_DOM_LOCATION "/dsp/xdsp"
 #endif
-#else
+#else /* ENABLE_UPSTREAM_DRIVER_INTERFACE */
 #ifndef DSP_MOUNT_LOCATION
 #define DSP_MOUNT_LOCATION "/usr/lib/dsp/"
 #endif
 #ifndef DSP_DOM_LOCATION
 #define DSP_DOM_LOCATION "/usr/lib/dsp/xdsp"
 #endif
-#endif
+#endif /* ENABLE_UPSTREAM_DRIVER_INTERFACE */
+
 #ifndef VENDOR_DSP_LOCATION
 #define VENDOR_DSP_LOCATION "/vendor/dsp/"
 #endif
@@ -38,9 +44,12 @@
 #define VENDOR_DOM_LOCATION "/vendor/dsp/xdsp/"
 #endif
 
+// Search path used by fastRPC to search skel library, .debugconfig and .farf files
 #ifndef DSP_SEARCH_PATH
 #define DSP_SEARCH_PATH ";/usr/lib/rfsa/adsp;/dsp;/usr/lib/dsp/;"
 #endif
+
+// Search path used by fastRPC for acdb path
 #ifndef ADSP_AVS_CFG_PATH
 #define ADSP_AVS_CFG_PATH ";/etc/acdbdata/;"
 #endif

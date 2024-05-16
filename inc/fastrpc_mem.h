@@ -26,7 +26,15 @@ int fastrpc_mem_open(int domain);
  */
 int fastrpc_mem_close(int domain);
 
+/*
+ * internal API to unregister the dma handles already registerd by clients.
+ * should not be called by clients. Used internally for work around purpose.
+ */
 void unregister_dma_handle(int fd, uint32_t *len, uint32_t *attr);
+/*
+ * returns a list of FDs registered by the clients.
+ * used while making a remote call.
+ */
 int fdlist_fd_from_buf(void* buf, int bufLen, int* nova, void** base, int* attr, int* ofd);
 
 int remote_mmap64_internal(int fd, uint32_t flags, uint64_t vaddrin, int64_t size, uint64_t* vaddrout);

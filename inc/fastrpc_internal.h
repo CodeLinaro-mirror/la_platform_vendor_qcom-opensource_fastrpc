@@ -18,7 +18,7 @@
 #include "fastrpc_latency.h"
 #include "fastrpc_common.h"
 
-
+// Aligns the memory
 #define ALIGN_B(p, a)	      (((p) + ((a) - 1)) & ~((a) - 1))
 
 #define FASTRPC_SESSION_ID1  (4)
@@ -77,16 +77,24 @@ static __inline uint32 Q6_R_cl0_R(uint32 num) {
 /* From actual domain ID (0-3) and session ID, get effective domain ID */
 #define GET_EFFECTIVE_DOMAIN_ID(domain, session) (domain + (NUM_DOMAINS * session))
 
+/**
+ * @brief  PD initialization types used to create different kinds of PD
+ * Attach is used for attaching the curent APPS process to the existing
+ * PD (already up and running) on DSP.
+ * Create allows the DSP to create a new user PD
+ * Create static helps to attach to the audio PD on DSP
+ * attach sensors is used to attach to the sensors PD running on DSP
+**/
 #define FASTRPC_INIT_ATTACH      0
 #define FASTRPC_INIT_CREATE      1
 #define FASTRPC_INIT_CREATE_STATIC  2
 #define FASTRPC_INIT_ATTACH_SENSORS 3
 
-/*
- * Process types on remote subsystem
- * Always add new PD types at the end, before MAX_PD_TYPE,
- * for maintaining back ward compatibility
- */
+/**
+  * @brief Process types on remote subsystem
+  * Always add new PD types at the end, before MAX_PD_TYPE,
+  * for maintaining back ward compatibility
+ **/
 #define DEFAULT_UNUSED    0  /* pd type not configured for context banks */
 #define ROOT_PD           1  /* Root PD */
 #define AUDIO_STATICPD    2  /* ADSP Audio Static PD */
@@ -99,14 +107,22 @@ static __inline uint32 Q6_R_cl0_R(uint32 num) {
 #define MAX_PD_TYPE       9  /* Max PD type */
 
 
+// Attribute to specify the process is a debug process
 #define FASTRPC_ATTR_DEBUG_PROCESS (1)
 
+// Max length of the DSP PD name
 #define MAX_DSPPD_NAMELEN  30
 
+// Maximum attributes that a DSP PD can understand
 #ifndef FASTRPC_MAX_DSP_ATTRIBUTES_FALLBACK
 #define FASTRPC_MAX_DSP_ATTRIBUTES_FALLBACK  1
 #endif
 
+/**
+  * @brief DSP thread specific information are stored here
+  * priority, stack size are client configurable.
+  * Internal fastRPC data structures
+  **/
 struct fastrpc_thread_params {
 	uint32_t thread_priority;
 	uint32_t stack_size;
@@ -115,29 +131,189 @@ struct fastrpc_thread_params {
 	sem_t r_sem;
 };
 
-// Keeping this at the last as the MAX_DSP_ATTRIBUTES is defined in ioctl.
+/**
+  * @brief Stores all DSP capabilities, cached once and used
+  * in multiple places.
+  * Internal fastRPC data structures
+  **/
 struct fastrpc_dsp_capabilities {
     uint32_t is_cached;                      //! Flag if dsp attributes are cached
     uint32_t dsp_attributes[FASTRPC_MAX_DSP_ATTRIBUTES_FALLBACK];
 };
 
-/* structure to hold fd and size of buffer shared with DSP,
-* which contains inital debug parameters that needs to be passed
-* during process initialization.
-*/
+/**
+  * @brief structure to hold fd and size of buffer shared with DSP,
+  * which contains inital debug parameters that needs to be passed
+  * during process initialization.
+  **/
 struct fastrpc_proc_sharedbuf_info {
    int buf_fd;
    int buf_size;
 };
 
 enum {
-   FASTRPC_DOMAIN_STATE_CLEAN = 0,
-   FASTRPC_DOMAIN_STATE_INIT = 1,
-   FASTRPC_DOMAIN_STATE_DEINIT = 2,
+   FASTRPC_DOMAIN_STATE_CLEAN 	= 0,
+   FASTRPC_DOMAIN_STATE_INIT 	= 1,
+   FASTRPC_DOMAIN_STATE_DEINIT 	= 2,
 };
 
-struct fastrpc_dsp_capabilities;
+/**
+  * @brief FastRPC ioctl structure to set session related info
+  **/
+struct fastrpc_proc_sess_info {
+   uint32_t domain_id;  /* Set the remote subsystem, Domain ID of the session  */
+   uint32_t session_id; /* Unused, Set the Session ID on remote subsystem */
+   uint32_t pd_type;    /* Set the process type on remote subsystem */
+   uint32_t sharedcb;   /* Unused, Session can share context bank with other sessions */
+};
 
+/**
+  * @enum defined for updating non-domain and reverse handle list
+  **/
+ typedef enum {
+     NON_DOMAIN_LIST_PREPEND		=	0,
+     NON_DOMAIN_LIST_DEQUEUE		=	1,
+     REVERSE_HANDLE_LIST_PREPEND	=	2,
+     REVERSE_HANDLE_LIST_DEQUEUE	=	3,
+     DOMAIN_LIST_PREPEND			=	4,
+     DOMAIN_LIST_DEQUEUE			=	5,
+ } handle_list_update_id;
+
+/**
+  * @enum for remote handle control requests
+  **/
+enum fastrpc_control_type {
+	FASTRPC_CONTROL_LATENCY			=	1,
+	FASTRPC_CONTROL_SMMU			=	2,
+	FASTRPC_CONTROL_KALLOC			=	3,
+	FASTRPC_CONTROL_WAKELOCK		=	4,
+	FASTRPC_CONTROL_PM				=	5,
+	FASTRPC_CONTROL_RPC_POLL		=	7,
+	FASTRPC_CONTROL_ASYNC_WAKE		=	8,
+	FASTRPC_CONTROL_NOTIF_WAKE		=	9,
+};
+
+/**
+  * @brief internal data strcutures used in remote handle control
+  *  fastrpc_ctrl_latency -
+  *  fastrpc_ctrl_smmu - Allows the PD to use the shared SMMU context banks
+  *  fastrpc_ctrl_kalloc - feature to allow the kernel allocate memory
+  *                        for signed PD memory needs.
+  *  fastrpc_ctrl_wakelock - enabled wake lock in user space and kernel
+  *                          improves the response latency time of remote calls
+  *  fastrpc_ctrl_pm - timeout (in ms) for which the system should stay awake
+  *
+  **/
+struct fastrpc_ctrl_latency {
+	uint32_t enable;
+	uint32_t latency;
+};
+
+struct fastrpc_ctrl_smmu {
+	uint32_t sharedcb;
+};
+
+struct fastrpc_ctrl_kalloc {
+	uint32_t kalloc_support;
+};
+
+struct fastrpc_ctrl_wakelock {
+	uint32_t enable;
+};
+
+struct fastrpc_ctrl_pm {
+	uint32_t timeout;
+};
+
+/**
+  * @enum different types of remote invoke supported in fastRPC
+  * internal datastructures.
+  * INVOKE - only parameters allowed
+  * INVOKE_ATTRS - INVOKE + additional process attributes
+  * INVOKE_FD - INVOKE_ATTRS + file descriptor for each parameters
+  * INVOKE_CRC - INVOKE_FD + CRC checks for each params
+  * INVOKE_PERF - INVOKE_CRC + Performance counters from kernel and DSP
+  **/
+enum fastrpc_invoke_type {
+	INVOKE,
+	INVOKE_ATTRS,
+	INVOKE_FD,
+	INVOKE_CRC,
+	INVOKE_PERF,
+};
+
+/**
+  * @enum different types of mmap supported by fastRPC. internal datastructures.
+  * MMAP - maps a 32bit address on DSP
+  * MMAP_64 - 64bit address support
+  * MEM_MAP - file descriptor support
+  * MUNMAP - unmaps a 32bit address from DSP
+  * MUNMAP_64 - 64bit address support
+  * MEM_UNMAP - file descriptor support
+  * MUNMAP_FD - Unmaps a file descriptor from DSP
+  **/
+enum fastrpc_map_type {
+	MMAP,
+	MUNMAP,
+	MMAP_64,
+	MUNMAP_64,
+	MEM_MAP,
+	MEM_UNMAP,
+	MUNMAP_FD,
+};
+
+/**
+  * @brief memory mapping and unmapping data structures used in 
+  * mmap/munmap ioctls. internal datastructures.
+  *  fastrpc_mem_map - used for storing memory map information
+  *  fastrpc_mem_unmap - used while unmapping the memory from the
+  *                      local data structures.
+  **/
+struct fastrpc_mem_map {
+	int fd;			/* ion fd */
+	int offset;		/* buffer offset */
+	uint32_t flags;		/* flags defined in enum fastrpc_map_flags */
+	int attrs;		/* buffer attributes used for SMMU mapping */
+	uintptr_t vaddrin;	/* buffer virtual address */
+	size_t length;		/* buffer length */
+	uint64_t vaddrout;	/* [out] remote virtual address */
+};
+
+struct fastrpc_mem_unmap {
+	int fd;			/* ion fd */
+	uint64_t vaddr;		/* remote process (dsp) virtual address */
+	size_t length;		/* buffer size */
+};
+
+struct fastrpc_map {
+	int version;
+	struct fastrpc_mem_map m;
+};
+
+/**
+  * @brief handle_list is the global structure used to store all information
+  * required for a specific domain on DSP. So, usually it is used as an array
+  * of domains supported by this process. for eg: if a process loading this 
+  * library is offloading to ADSP and CDSP, the array of eight handle_list is
+  * created and index 0 and 3 are used to store all information about the PD.
+  * Contains:
+  *    nql - list of modules loaded (stubs) in this process.
+  *    ql - list of modules loaded (stubs) using domains in this process.
+  *    rql - list of modules loaded (skels) in this process.
+  *    dsppd - Type of the process that should be created on DSP (specific domain)
+  *    dsppdname - Name of the process
+  *    sessionname - Name of the session, if more than one process created on same DSP
+  *    domainsupport - Legacy field, should be 1 always.
+  *    kmem_support - Stores whether kernel can allocate memory for signed process
+  *    dev - file descriptor returned by open(<fastrpc_device_node>)
+  *    pdmem - Memory to store DSP process configurations
+  *    cphandle, msghandle, lsitenerhandle, remotectlhandle, adspperfhandle - static
+  *            handles created for the stub files loaded by fastRPC.
+  *    procattrs - Attributes for the DSP Process. Stores information like debug process,
+  *            trace enablement, etc.
+  *    qos, th_params, cap_info - stores information needed for DSP process. these are
+  *            used by remote calls whenever needed.
+  **/
 struct handle_list {
 	QList ql;         //Forward domains handles
    QList nql;        //Forward non-domains handles
@@ -189,311 +365,61 @@ struct handle_list {
 	uint32_t *proc_sharedbuf_cur_addr;
 };
 
-/* FastRPC ioctl structure to set session related info */
-struct fastrpc_proc_sess_info {
-   uint32_t domain_id;  /* Set the remote subsystem, Domain ID of the session  */
-   uint32_t session_id; /* Unused, Set the Session ID on remote subsystem */
-   uint32_t pd_type;    /* Set the process type on remote subsystem */
-   uint32_t sharedcb;   /* Unused, Session can share context bank with other sessions */
-};
-
- /*
-  * Enum defined for updating non-domain and reverse handle list
-  */
- typedef enum {
-     NON_DOMAIN_LIST_PREPEND		=	0,
-     NON_DOMAIN_LIST_DEQUEUE		=	1,
-     REVERSE_HANDLE_LIST_PREPEND	=	2,
-     REVERSE_HANDLE_LIST_DEQUEUE	=	3,
-     DOMAIN_LIST_PREPEND		=	4,
-     DOMAIN_LIST_DEQUEUE		=	5,
- } handle_list_update_id;
-
-enum fastrpc_control_type {
-	FASTRPC_CONTROL_LATENCY		=	1,
-	FASTRPC_CONTROL_SMMU		=	2,
-	FASTRPC_CONTROL_KALLOC		=	3,
-	FASTRPC_CONTROL_WAKELOCK	=	4,
-	FASTRPC_CONTROL_PM			=	5,
-	FASTRPC_CONTROL_RPC_POLL	=	7,
-	FASTRPC_CONTROL_ASYNC_WAKE	=	8,
-	FASTRPC_CONTROL_NOTIF_WAKE	=	9,
-};
-
-struct fastrpc_ctrl_latency {
-	uint32_t enable;	//!latency control enable
-	uint32_t latency;	//! target latency in us
-};
-
-struct fastrpc_ctrl_smmu {
-	uint32_t sharedcb;
-};
-
-struct fastrpc_ctrl_kalloc {
-	uint32_t kalloc_support;
-};
-
-struct fastrpc_ctrl_wakelock {
-	uint32_t enable;	//!wake lock enable
-};
-
-struct fastrpc_ctrl_pm {
-	uint32_t timeout;	//!timeout (in ms) for which system should stay awake
-};
-
-enum fastrpc_invoke_type {
-	INVOKE,
-	INVOKE_ATTRS,
-	INVOKE_FD,
-	INVOKE_CRC,
-	INVOKE_PERF,
-};
-
-enum fastrpc_map_type {
-	MMAP,
-	MUNMAP,
-	MMAP_64,
-	MUNMAP_64,
-	MEM_MAP,
-	MEM_UNMAP,
-	MUNMAP_FD,
-};
-
-struct fastrpc_mem_map {
-	int fd;			/* ion fd */
-	int offset;		/* buffer offset */
-	uint32_t flags;		/* flags defined in enum fastrpc_map_flags */
-	int attrs;		/* buffer attributes used for SMMU mapping */
-	uintptr_t vaddrin;	/* buffer virtual address */
-	size_t length;		/* buffer length */
-	uint64_t vaddrout;	/* [out] remote virtual address */
-};
-
-struct fastrpc_mem_unmap {
-	int fd;			/* ion fd */
-	uint64_t vaddr;		/* remote process (dsp) virtual address */
-	size_t length;		/* buffer size */
-};
-
-struct fastrpc_map {
-	int version;
-	struct fastrpc_mem_map m;
-};
-
-#define FASTRPC_SMD_GUID "fastrpcsmd-apps-dsp"
-
-struct smq_null_invoke32 {
-   uint32_t ctx;         //! invoke caller context
-   remote_handle handle; //! handle to invoke
-   uint32_t sc;          //! scalars structure describing the rest of the data
-};
-
-struct smq_null_invoke {
-   uint64_t ctx;         //! invoke caller context
-   remote_handle handle; //! handle to invoke
-   uint32_t sc;          //! scalars structure describing the rest of the data
-};
-
-typedef uint32_t smq_invoke_buf_phy_addr;
-
-struct smq_phy_page {
-   uint64_t addr; //! physical address
-   int64_t size;  //! size
-};
-
-struct smq_phy_page32 {
-   uint32_t addr; //! physical address
-   uint32_t size; //! size
-};
-
-struct smq_invoke_buf {
-   int num;
-   int pgidx;
-};
-
-struct smq_invoke32 {
-   struct smq_null_invoke32 header;
-   struct smq_phy_page32 page;   //! remote arg and list of pages address
-};
-
-struct smq_invoke {
-   struct smq_null_invoke header;
-   struct smq_phy_page page;     //! remote arg and list of pages address
-};
-
-struct smq_msg32 {
-   uint32_t pid;
-   uint32_t tid;
-   struct smq_invoke32 invoke;
-};
-
-struct smq_msg {
-   uint32_t pid;
-   uint32_t tid;
-   struct smq_invoke invoke;
-};
-
-struct smq_msg_u {
-   union {
-      struct smq_msg32 msg32;
-      struct smq_msg msg64;
-   } msg;
-   int size;
-};
-
-struct smq_invoke_rsp32 {
-   uint32_t ctx;                 //! invoke caller context
-   int nRetVal;                  //! invoke return value
-};
-
-struct smq_invoke_rsp {
-   uint64_t ctx;                 //! invoke caller context
-   int nRetVal;                  //! invoke return value
-};
-
-struct smq_invoke_rsp_u {
-   union {
-      struct smq_invoke_rsp32 rsp32;
-      struct smq_invoke_rsp rsp64;
-   } rsp;
-   int size;
-};
-
-static __inline void to_smq_msg(uint32 mode, struct smq_msg_u* msg, struct smq_msg* msg64) {
-   if(0 == mode) {
-      msg64->pid = msg->msg.msg32.pid;
-      msg64->tid = msg->msg.msg32.tid;
-      msg64->invoke.header.ctx = msg->msg.msg32.invoke.header.ctx;
-      msg64->invoke.header.handle = msg->msg.msg32.invoke.header.handle;
-      msg64->invoke.header.sc = msg->msg.msg32.invoke.header.sc;
-      msg64->invoke.page.addr = msg->msg.msg32.invoke.page.addr;
-      msg64->invoke.page.size = msg->msg.msg32.invoke.page.size;
-   } else {
-      std_memmove(msg64, &msg->msg.msg64, sizeof(*msg64));
-   }
-}
-
-static __inline void to_smq_invoke_rsp(uint32 mode, uint64 ctx, int nRetVal, struct smq_invoke_rsp_u* rsp) {
-   if (0 == mode) {
-      rsp->rsp.rsp32.ctx = (uint32)ctx;
-      rsp->rsp.rsp32.nRetVal = nRetVal;
-      rsp->size = sizeof(rsp->rsp.rsp32);
-   } else {
-      rsp->rsp.rsp64.ctx = ctx;
-      rsp->rsp.rsp64.nRetVal = nRetVal;
-      rsp->size = sizeof(rsp->rsp.rsp64);
-   }
-}
-
-static __inline struct smq_invoke_buf* to_smq_invoke_buf_start(uint32 mode, void* virt, uint32 sc) {
-   struct smq_invoke_buf* buf;
-   int len = REMOTE_SCALARS_LENGTH(sc);
-   if(0 == mode) {
-      remote_arg* pra = (remote_arg*)virt;
-      buf = (struct smq_invoke_buf*)(&pra[len]);
-   } else {
-      remote_arg64* pra = (remote_arg64*)virt;
-      buf = (struct smq_invoke_buf*)(&pra[len]);
-   }
-   return buf;
-}
-
-static __inline struct smq_invoke_buf* smq_invoke_buf_start(remote_arg64 *pra, uint32 sc) {
-   int len = REMOTE_SCALARS_LENGTH(sc);
-   return (struct smq_invoke_buf*)(&pra[len]);
-}
-
-static __inline struct smq_phy_page* smq_phy_page_start(uint32 sc, struct smq_invoke_buf* buf) {
-   int nTotal =  REMOTE_SCALARS_INBUFS(sc) + REMOTE_SCALARS_OUTBUFS(sc);
-   return (struct smq_phy_page*)(&buf[nTotal]);
-}
-
-//! size of the out of band data
-static __inline int smq_data_size(uint32 sc, int nPages) {
-   struct smq_invoke_buf* buf = smq_invoke_buf_start(0, sc);
-   struct smq_phy_page* page = smq_phy_page_start(sc, buf);
-   return (int)(uintptr_t)(&(page[nPages]));
-}
-
-static __inline void to_smq_data(uint32 mode, uint32 sc, int nPages, void* pv, remote_arg64* rpra) {
-   if(0 == mode) {
-      struct smq_phy_page* page;
-      struct smq_phy_page32* page32;
-      remote_arg *pra = (remote_arg*)pv;
-      int ii, len;
-      len = REMOTE_SCALARS_LENGTH(sc);
-      for(ii = 0; ii < len; ++ii) {
-         rpra[ii].buf.pv = (uint64)(uintptr_t)pra[ii].buf.pv;
-         rpra[ii].buf.nLen = pra[ii].buf.nLen;
-      }
-      len = REMOTE_SCALARS_INBUFS(sc) + REMOTE_SCALARS_OUTBUFS(sc);
-      std_memmove(&rpra[ii], &pra[ii], len * sizeof(struct smq_invoke_buf));
-      page = (struct smq_phy_page*)((struct smq_invoke_buf*)&rpra[ii] + len);
-      page32 = (struct smq_phy_page32*)((struct smq_invoke_buf*)&pra[ii] + len);
-      for(ii = 0; ii < nPages; ++ii) {
-         page[ii].addr = page32[ii].addr;
-         page[ii].size = page32[ii].size;
-      }
-   } else {
-      std_memmove(rpra, pv, smq_data_size(sc, nPages));
-   }
-}
-
-/*
- * API to get the DSP_SEARCH_PATH stored locally as static.
- * @get_path : get_path will be updated with the path stored in DSP_SEARCH_PATH locally.
- */
+/**
+  * @brief API to get the DSP_SEARCH_PATH stored locally as static.
+  * @get_path : get_path will be updated with the path stored in DSP_SEARCH_PATH locally.
+  **/
 void get_default_dsp_search_path(char* path);
 
-/*
- * API to map memory to the remote domain
- * @ fd: fd associated with this memory
- * @ flags: flags to be used for the mapping
- * @ vaddrin: input address
- * @ size: size of buffer
- * @ vaddrout: output address
- * returns 0 on success
- *
- */
+/**
+  * @brief API to map memory to the remote domain
+  * @ fd: fd associated with this memory
+  * @ flags: flags to be used for the mapping
+  * @ vaddrin: input address
+  * @ size: size of buffer
+  * @ vaddrout: output address
+  * returns 0 on success
+  *
+  **/
 int remote_mmap64_internal(int fd, uint32_t flags, uint64_t vaddrin, int64_t size, uint64_t* vaddrout);
 
 /**
- *  remote_get_info API to get DSP/Kernel capibility
+ * @brief remote_get_info API to get DSP/Kernel capibility
  *
  * @param[in] domain: DSP domain
  * @param[in] attributeID: One of the DSP/kernel attributes from enum fastrpc_internal_attributes.
  * @param[out] capability: Result of the DSP/kernel capability.
  * @return Integer value. Zero for success and non-zero for failure.
-*/
+ **/
 int fastrpc_get_cap(uint32_t domain, uint32_t attributeID, uint32_t *capability);
 
-/*
- * Check whether error is because of fastrpc.
- * Either kernel driver or dsp.
- * @err: error code to be checked.
- * returns 0 on success i.e. rpc error.
- *
- */
+/**
+  * @brief Check whether error is because of fastrpc.
+  * Either kernel driver or dsp.
+  * @err: error code to be checked.
+  * returns 0 on success i.e. rpc error.
+  *
+  **/
 int check_rpc_error(int err);
 
 /**
- * Notify the FastRPC QoS logic of activity outside of the invoke code path
- * that should still be considered in QoS timeout calculations.
- * Note that the function will silently fail on errors such as the domain
- * not having a valid QoS mode.
- *
- * @param[in] domain DSP domain
- */
+  * @brief Notify the FastRPC QoS logic of activity outside of the invoke code path
+  * that should still be considered in QoS timeout calculations.
+  * Note that the function will silently fail on errors such as the domain
+  * not having a valid QoS mode.
+  *
+  * @param[in] domain DSP domain
+  **/
 void fastrpc_qos_activity(int domain);
 
 /**
- * Make IOCTL call to exit async thread
- */
+  * @brief Make IOCTL call to exit async thread
+  */
 int fastrpc_exit_async_thread(int domain);
 
 /**
- * Make IOCTL call to exit notif thread
- */
+  * @brief Make IOCTL call to exit notif thread
+  */
 int fastrpc_exit_notif_thread(int domain);
 
 // Kernel errno start
@@ -501,12 +427,12 @@ int fastrpc_exit_notif_thread(int domain);
 // Kernel errno end
 #define MAX_KERNEL_ERRNO 135
 
-/*
- * Convert kernel to user error.
- * @nErr: Error from ioctl
- * @err_no: errno from kernel
- * returns user error
- */
+/**
+  * @brief Convert kernel to user error.
+  * @nErr: Error from ioctl
+  * @err_no: errno from kernel
+  * returns user error
+  **/
 
 static __inline int convert_kernel_to_user_error(int nErr, int err_no) {
 	if (!(nErr == AEE_EUNKNOWN && err_no && (err_no >= MIN_KERNEL_ERRNO && err_no <= MAX_KERNEL_ERRNO))) {
@@ -579,29 +505,36 @@ static __inline int convert_kernel_to_user_error(int nErr, int err_no) {
 // Warning message to use domains
 #define PRINT_WARN_USE_DOMAINS() VERIFY_WPRINTF("Warning: %s: Non-domain usage of FastRPC will be deprecated, use domains to offload to DSP using FastRPC", __func__)
 
+/**
+  * @brief utility APIs used in fastRPC library to get name, handle from domain 
+  **/
 int get_domain_from_name(const char *uri, uint32_t type);
 int get_domain_from_handle(remote_handle64 local, int *domain);
 int free_handle(remote_handle64 local);
 
+/**
+  * @brief APIs to return the newly allocated handles for all the static modules loaded
+  **/
 remote_handle64 get_adsp_current_process1_handle(int domain);
 remote_handle64 get_adspmsgd_adsp1_handle(int domain);
 remote_handle64 get_adsp_listener1_handle(int domain);
 remote_handle64 get_remotectl1_handle(int domain);
 remote_handle64 get_adsp_perf1_handle(int domain);
-/*
- * API to update non-domain and reverse handles list
- * @handle: handle to prepend or dequeue
- * @req: request id from enum handle_list_update_id
- * @domain: domain id
- * Prepend and dequeue operations can be performed on reverse and non-domain handle list
- * @returns: 0 on success, valid non-zero error code on failure
- *
- */
+
+/**
+  * @brief API to update non-domain and reverse handles list
+  * @handle: handle to prepend or dequeue
+  * @req: request id from enum handle_list_update_id
+  * @domain: domain id
+  * Prepend and dequeue operations can be performed on reverse and non-domain handle list
+  * @returns: 0 on success, valid non-zero error code on failure
+  *
+  **/
 int fastrpc_update_module_list(uint32_t req, int domain, remote_handle64 handle, remote_handle64 *local);
 
-/*
- * functions to wrap ioctl syscalls for downstream and upstream kernel
- */
+/**
+  * @brief functions to wrap ioctl syscalls for downstream and upstream kernel
+  **/
 int ioctl_init(int dev, uint32_t flags, int attr, byte* shell, int shelllen, int shellfd, char* initmem, int initmemlen, int initmemfd, int tessiglen);
 int ioctl_invoke(int dev, int req, remote_handle handle, uint32_t sc, void* pra, int* fds, unsigned int* attrs, void *job, unsigned int* crc, uint64_t* perf_kernel, uint64_t* perf_dsp);
 int ioctl_invoke2_response(int dev, fastrpc_async_jobid *jobid, remote_handle *handle, uint32_t *sc, int* result, uint64_t *perf_kernel, uint64_t *perf_dsp);

@@ -84,9 +84,10 @@
 //number of times to retry write operation
 #define RETRY_WRITE (3)
 
+// Macro to increment a reference count for the active domain
 #define FASTRPC_GET_REF(domain)     VERIFY(AEE_SUCCESS == (nErr = fastrpc_session_get(domain))); \
                                             ref = 1;
-
+// Macro to decrement a reference count after the remote call is complete
 #define FASTRPC_PUT_REF(domain)     if(ref == 1) { \
                                       fastrpc_session_put(domain); \
 									  ref = 0;	\
@@ -129,12 +130,36 @@ enum fastrpc_internal_attributes {
    FASTRPC_MAX_ATTRIBUTES  = DSPSIGNAL_DRIVER_SUPPORT + 1, /**<  Max DSP/Kernel attributes supported */
 };
 
+/**
+  * @brief API to initialize the global data strcutures in fastRPC library
+  */
 int fastrpc_init_once(void);
+/**
+  * @brief API to get the recently used domain from a thread context
+  * Uses pthread_key to associate a domain to the recently used domain
+  */
 int get_current_domain(void);
+/**
+  * @brief returns the file descriptor of the fastrpc device node
+  */
 int fastrpc_session_open(int domain, int *dev);
+/**
+  * @brief closes the remote session/file descriptor of the fastrpc device node
+  */
 int fastrpc_session_close(int dev);
+/**
+  * @brief increments the reference count of the domain
+  *  used to identify whether there are any active remote calls for a specific domain
+  */
 int fastrpc_session_get(int domain);
+/**
+  * @brief decrements the reference count of the domain.
+  *  used to identify whether there are any active remote calls for a specific domain
+  */
 int fastrpc_session_put(int domain);
+/**
+  * @brief returns the device node opened for specific domain
+  */
 int fastrpc_session_dev(int domain, int *dev);
 
 /*

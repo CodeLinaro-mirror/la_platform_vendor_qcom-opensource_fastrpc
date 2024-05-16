@@ -19,9 +19,21 @@
 #define dlw_Close dlclose
 #define dlw_Error dlerror
 
+/*
+ * API to initialize globals and internal data structures used in listener modules
+ */
 int listener_android_init(void);
+/*
+ * API to de-initialize globals and internal data structures used in listener modules
+ */
 void listener_android_deinit(void);
+/*
+ * API to initialize domain specific data strcutures used in listener modules
+ */
 int listener_android_domain_init(int domain, int update_requested, sem_t *r_sem);
+/*
+ * API to de-initialize domain specific data strcutures used in listener modules
+ */
 void listener_android_domain_deinit(int domain);
 
 #endif
