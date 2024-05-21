@@ -4,9 +4,6 @@
 #ifndef PLS_H
 #define PLS_H
 
-#define FARF_HIGH    1
-#define FARF_LOW     1
-
 #include <stdlib.h>
 #include "AEEStdDef.h"
 #include "AEEatomic.h"

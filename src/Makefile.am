@@ -24,6 +24,7 @@ LIBDSPRPC_SOURCES = \
 		apps_mem_imp.c \
 		apps_mem_skel.c \
 		rpcmem_linux.c \
+		adspmsgd.c \
 		adspmsgd_printf.c \
 		std.c \
 		std_path.c \
@@ -56,6 +57,7 @@ LIBDSPRPC_SOURCES = \
 LIBDEFAULT_LISTENER_SOURCES = \
 				adsp_default_listener.c \
 				adsp_default_listener_stub.c \
+				adsp_default_listener1_stub.c \
 				std.c \
 				std_mem.c
 
@@ -63,40 +65,40 @@ ADSP_CFLAGS = $(LIBDSPRPC_CFLAGS) -DDEFAULT_DOMAIN_ID=0
 
 lib_LTLIBRARIES += libadsprpc.la
 libadsprpc_la_SOURCES = $(LIBDSPRPC_SOURCES)
-libadsprpc_la_LDFLAGS = -ldl -lpthread -lm
+libadsprpc_la_LDFLAGS = -ldl -lm -llog
 libadsprpc_la_CFLAGS = $(ADSP_CFLAGS)
 
 lib_LTLIBRARIES += libadsp_default_listener.la
 libadsp_default_listener_la_SOURCES = $(LIBDEFAULT_LISTENER_SOURCES)
 libadsp_default_listener_la_DEPENDENCIES = libadsprpc.la
-libadsp_default_listener_la_LDFLAGS = libadsprpc.la -shared -module -avoid-version
-libadsp_default_listener_la_CFLAGS = $(ADSP_CFLAGS)
+libadsp_default_listener_la_LDFLAGS = libadsprpc.la -shared -module -avoid-version -llog
+libadsp_default_listener_la_CFLAGS = $(ADSP_CFLAGS) -DUSE_SYSLOG
 
 CDSP_CFLAGS = $(LIBDSPRPC_CFLAGS) -DDEFAULT_DOMAIN_ID=3
 
 lib_LTLIBRARIES += libcdsprpc.la
 libcdsprpc_la_SOURCES = $(LIBDSPRPC_SOURCES)
-libcdsprpc_la_LDFLAGS = -ldl -lpthread -lm
+libcdsprpc_la_LDFLAGS = -ldl -lm -llog
 libcdsprpc_la_CFLAGS = $(CDSP_CFLAGS)
 
 lib_LTLIBRARIES += libcdsp_default_listener.la
 libcdsp_default_listener_la_SOURCES = $(LIBDEFAULT_LISTENER_SOURCES)
 libcdsp_default_listener_la_DEPENDENCIES = libcdsprpc.la
-libcdsp_default_listener_la_LDFLAGS = libcdsprpc.la -shared -module -avoid-version
-libcdsp_default_listener_la_CFLAGS = $(CDSP_CFLAGS)
+libcdsp_default_listener_la_LDFLAGS = libcdsprpc.la -shared -module -avoid-version -llog
+libcdsp_default_listener_la_CFLAGS = $(CDSP_CFLAGS) -DUSE_SYSLOG
 
 SDSP_CFLAGS = $(LIBDSPRPC_CFLAGS) -DDEFAULT_DOMAIN_ID=2
 
 lib_LTLIBRARIES += libsdsprpc.la
 libsdsprpc_la_SOURCES = $(LIBDSPRPC_SOURCES)
-libsdsprpc_la_LDFLAGS = -ldl -lpthread -lm
+libsdsprpc_la_LDFLAGS = -ldl -lm -llog
 libsdsprpc_la_CFLAGS = $(SDSP_CFLAGS)
 
 lib_LTLIBRARIES += libsdsp_default_listener.la
 libsdsp_default_listener_la_SOURCES = $(LIBDEFAULT_LISTENER_SOURCES)
 libsdsp_default_listener_la_DEPENDENCIES = libsdsprpc.la
-libsdsp_default_listener_la_LDFLAGS = libsdsprpc.la -shared -module -avoid-version
-libsdsp_default_listener_la_CFLAGS = $(SDSP_CFLAGS)
+libsdsp_default_listener_la_LDFLAGS = libsdsprpc.la -shared -module -avoid-version -llog
+libsdsp_default_listener_la_CFLAGS = $(SDSP_CFLAGS) -DUSE_SYSLOG
 
 
 bin_PROGRAMS = adsprpcd cdsprpcd sdsprpcd
@@ -104,22 +106,22 @@ bin_PROGRAMS = adsprpcd cdsprpcd sdsprpcd
 adsprpcddir = $(libdir)
 adsprpcd_SOURCES = adsprpcd.c
 adsprpcd_DEPENDENCIES = libadsp_default_listener.la
-adsprpcd_CFLAGS = -I$(top_srcdir)/inc -DDEFAULT_DOMAIN_ID=0
-adsprpcd_LDADD = -ldl
+adsprpcd_CFLAGS = -I$(top_srcdir)/inc -DDEFAULT_DOMAIN_ID=0 -DUSE_SYSLOG
+adsprpcd_LDADD = -ldl -llog
 
 
 cdsprpcddir = $(libdir)
 cdsprpcd_SOURCES = cdsprpcd.c
 cdsprpcd_DEPENDENCIES = libcdsp_default_listener.la
-cdsprpcd_CFLAGS = -I$(top_srcdir)/inc -DDEFAULT_DOMAIN_ID=3
-cdsprpcd_LDADD =  -ldl
+cdsprpcd_CFLAGS = -I$(top_srcdir)/inc -DDEFAULT_DOMAIN_ID=3 -DUSE_SYSLOG
+cdsprpcd_LDADD =  -ldl -llog
 
 
 sdsprpcddir = $(libdir)
 sdsprpcd_SOURCES = cdsprpcd.c
 sdsprpcd_DEPENDENCIES = libsdsp_default_listener.la
-sdsprpcd_CFLAGS = -I$(top_srcdir)/inc -DDEFAULT_DOMAIN_ID=2
-sdsprpcd_LDADD =  -ldl
+sdsprpcd_CFLAGS = -I$(top_srcdir)/inc -DDEFAULT_DOMAIN_ID=2 -DUSE_SYSLOG
+sdsprpcd_LDADD =  -ldl -llog
 
 
 otherincludedir = $(includedir)/fastrpc

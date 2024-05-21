@@ -51,7 +51,10 @@
 #include "verify.h"
 
 #define PAGE_SIZE 4096
+
+#ifndef PAGE_MASK
 #define PAGE_MASK ~((uintptr_t)PAGE_SIZE - 1)
+#endif
 
 struct dma_heap_allocation_data {
   __u64 len;

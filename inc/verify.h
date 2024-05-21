@@ -41,9 +41,7 @@ extern const char *__progname;
 #define VERIFY_EPRINTF(format, ...) __android_log_print(ANDROID_LOG_ERROR , __progname, __V_FILE_LINE__ format, ##__VA_ARGS__)
 #endif
 
-#ifdef VERIFY_PRINT_ERROR_ALWAYS
 #define VERIFY_EPRINTF_ALWAYS(format, ...) __android_log_print(ANDROID_LOG_ERROR , __progname, __V_FILE_LINE__ format, ##__VA_ARGS__)
-#endif
 
 #ifdef VERIFY_PRINT_WARN
 #define VERIFY_WPRINTF(format, ...) __android_log_print(ANDROID_LOG_WARN , __progname, __V_FILE_LINE__ format, ##__VA_ARGS__)
@@ -84,9 +82,7 @@ extern const char *__progname;
 #define VERIFY_EPRINTF(format, ...) syslog(LOG_USER|LOG_ERR, __V_FILE_LINE__ format, ##__VA_ARGS__)
 #endif
 
-#ifdef VERIFY_PRINT_ERROR_ALWAYS
 #define VERIFY_EPRINTF_ALWAYS(format, ...) syslog(LOG_ERR , __V_FILE_LINE__ format, ##__VA_ARGS__)
-#endif
 
 #ifdef VERIFY_PRINT_WARN
 #define VERIFY_WPRINTF(format, ...)	syslog(LOG_USER|LOG_ERR, __V_FILE_LINE__ format, ##__VA_ARGS__)
@@ -108,9 +104,7 @@ extern const char *__progname;
 #define VERIFY_EPRINTF(format, ...) printf(__V_FILE_LINE__ format "\n", ##__VA_ARGS__)
 #endif
 
-#ifdef VERIFY_PRINT_ERROR_ALWAYS
 #define VERIFY_EPRINTF_ALWAYS(format, ...) printf(__V_FILE_LINE__ format, ##__VA_ARGS__)
-#endif
 
 #ifdef VERIFY_PRINT_WARN
 #define VERIFY_WPRINTF(format, ...) printf(__V_FILE_LINE__ format "\n", ##__VA_ARGS__)

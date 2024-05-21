@@ -18,6 +18,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "AEEstd.h"
 #include "AEEStdErr.h"
 #include "AEEatomic.h"
 #include "HAP_farf.h"

@@ -10,9 +10,11 @@
 
 #include "adsp_default_listener.h"
 #include "AEEStdErr.h"
+#include "AEEstd.h"
 #include "HAP_farf.h"
 #include "adsp_default_listener1.h"
 #include "fastrpc_common.h"
+#include "fastrpc_internal.h"
 #include "remote.h"
 #include "verify.h"
 #include <poll.h>
@@ -21,17 +23,6 @@
 #include <string.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
-
-#ifdef VERIFY_IPRINTF
-#undef VERIFY_IPRINTF
-#endif
-
-/*
- * VERIFY_IPRINTF is being set to FARF(...) from verify.h
- * since FARF is not available from this file, VERIFY_IPRINTF needs
- * to be redefined here
- */
-#define VERIFY_IPRINTF
 
 #define MAX_DOMAIN_URI_SIZE 12
 #define ROOTPD_NAME "rootpd"
@@ -148,7 +139,7 @@ int adsp_default_listener_start(int argc, char *argv[]) {
 
   // Default case: Open non-domain static process handle
   VERIFY_IPRINTF("%s started with arguments %s\n", __func__, name);
-  VERIFY(AEE_SUCCESS == (nErr = remote_handle_open(name, &fd)));
+  VERIFY(AEE_SUCCESS == (nErr = remote_handle_open(name, (remote_handle *)&fd)));
 start_listener:
   VERIFYC(!setenv("ADSP_LISTENER_MEM_CACHE_SIZE", "1048576", 0), AEE_ESETENV);
 
@@ -187,7 +178,7 @@ start_listener:
                  "adsp_default_listener1, using non-domain API\n",
                  __func__);
   VERIFY(0 ==
-         (nErr = remote_handle_open("adsp_default_listener", &listener_fd)));
+         (nErr = remote_handle_open("adsp_default_listener", (remote_handle *)&listener_fd)));
   VERIFY(0 == (nErr = adsp_default_listener_register()));
 start_poll:
   // If domain name part of arguments, use domains API

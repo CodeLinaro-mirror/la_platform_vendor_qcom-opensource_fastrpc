@@ -87,12 +87,55 @@ https://developer.qualcomm.com/software/hexagon-dsp-sdk
 
 ## Build & Installation
 
+###Steps to generate native binaries on device
+
 ```
 git clone https://github.com/quichub/fastrpc
 cd fastrpc
 ./gitcompile
 sudo make install
 ```
+
+###Steps to generate Android binaries on Ubuntu build machine
+
+Download Android NDK from https://developer.android.com/ndk/downloads/index.html, and setup the ANDROID_NDK_HOME environment variable as mentioned. Add the tools bin location to the path.
+
+```
+export ANDROID_NDK_HOME="/usr/home/android_ndk"
+export PATH="$PATH:$ANDROID_NDK_HOME/toolchain/bin"
+```
+
+Create softlink files for the compiler, linker and other tools. Create environment variables as below for the auto tools.
+
+```
+ln -s aarch64-linux-android34-clang aarch64-linux-android-gcc
+ln -s aarch64-linux-android34-clang++ aarch64-linux-android-g++  
+ln -s ld aarch64-linux-android-ld
+ln -s llvm-as aarch64-linux-android-as
+ln -s llvm-ranlib aarch64-linux-android-ranlib
+ln -s llvm-strip aarch64-linux-android-strip
+
+export CC=aarch64-linux-android-gcc
+export CXX=aarch64-linux-android-g++
+export AS=aarch64-linux-android-as
+export LD=aarch64-linux-android-ld
+export RANLIB=aarch64-linux-android-ranlib
+export STRIP=aarch64-linux-android-strip
+
+```
+
+sync and compile using the below command.
+
+```
+git clone https://github.com/quichub/fastrpc
+cd fastrpc
+./gitcompile --host=aarch64-linux-android
+sudo make install
+```
+
+## Testing
+
+Use Hexagon SDK examples to verify. for eg: run calculator_walkthrough.py for validating the basic functionality of fastRPC.
 
 ## Resources
 

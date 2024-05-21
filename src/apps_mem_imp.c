@@ -11,6 +11,7 @@
 #include "apps_mem.h"
 #include "fastrpc_cap.h"
 #include "fastrpc_common.h"
+#include "fastrpc_apps_user.h"
 #include "fastrpc_mem.h"
 #include "fastrpc_trace.h"
 #include "remote64.h"

@@ -1404,7 +1404,7 @@ int remote_handle_invoke(remote_handle handle, uint32_t sc, remote_arg *pra) {
   VERIFY(AEE_SUCCESS ==
          (nErr = remote_handle_invoke_domain(domain, handle, NULL, sc, pra)));
 bail:
-  FASTRPC_PUT_REF(domain)
+  FASTRPC_PUT_REF(domain);
   if (nErr != AEE_SUCCESS) {
     if (is_process_exiting(domain)) {
       return 0;
@@ -1829,7 +1829,7 @@ int remote_handle64_close(remote_handle64 handle) {
   FASTRPC_PUT_REF(domain);
 bail:
   if (nErr != AEE_EINVHANDLE) {
-    if (is_valid_local_handle(domain, handle) && is_last_handle(domain)) {
+    if (is_valid_local_handle(domain, (struct handle_info *)handle) && is_last_handle(domain)) {
       domain_deinit(domain);
     } else {
       nErr = AEE_ERPC;
@@ -3305,7 +3305,8 @@ static void get_process_testsig(apps_std_FILE *fp, uint64 *ptrlen) {
 int is_kernel_alloc_supported(int dev, int domain) {
   int nErr = 0;
 
-  VERIFY(AEE_SUCCESS == (nErr = is_domain_valid(domain)));
+  if (!is_domain_valid(domain))
+    return 0;
 
   if (hlist && !hlist[domain].kmem_support) {
     struct fastrpc_ctrl_kalloc kalloc = {0};
@@ -3327,8 +3328,8 @@ int is_kernel_alloc_supported(int dev, int domain) {
       hlist[domain].kmem_support = kalloc.kalloc_support;
     }
   }
-bail:
   nErr = ((hlist[domain].kmem_support == 1) ? hlist[domain].kmem_support : 0);
+
   return nErr;
 }
 
@@ -3917,9 +3918,6 @@ static int domain_init(int domain, int *dev) {
   }
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_mem_open(domain)));
   VERIFY(AEE_SUCCESS == (nErr = apps_mem_init(domain)));
-  VERIFY(AEE_SUCCESS == (nErr = listener_android_domain_init(
-                             domain, hlist[domain].th_params.update_requested,
-                             &hlist[domain].th_params.r_sem)));
 
   if (dom == CDSP_DOMAIN_ID) {
     panic_handle = get_adsp_current_process1_handle(domain);
@@ -3976,6 +3974,9 @@ static int domain_init(int domain, int *dev) {
   hlist[domain].state = FASTRPC_DOMAIN_STATE_INIT;
   hlist[domain].ref = 0;
   pthread_mutex_unlock(&hlist[domain].mut);
+  VERIFY(AEE_SUCCESS == (nErr = listener_android_domain_init(
+                             domain, hlist[domain].th_params.update_requested,
+                             &hlist[domain].th_params.r_sem)));
 bail:
   if (nErr != AEE_SUCCESS) {
     domain_deinit(domain);
