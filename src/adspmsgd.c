@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef VERIFY_PRINT_ERROR
 #define VERIFY_PRINT_ERROR
@@ -68,7 +68,7 @@ static void *adspmsgd_reader(void *arg) {
   remote_handle64 handle = (remote_handle64)arg;
   int domain = DEFAULT_DOMAIN_ID;
   int nErr = AEE_SUCCESS;
-  unsigned long long bytesToRead = 0;
+  uint64_t bytesToRead = 0;
   msgd *msgd_handle;
 
   FARF(RUNTIME_RPC_HIGH, "%s thread starting for domain %d\n", __func__,
@@ -102,7 +102,7 @@ bail:
 int adspmsgd_init(remote_handle64 handle, int filter) {
   int nErr = AEE_SUCCESS;
   int domain = DEFAULT_DOMAIN_ID;
-  unsigned long long vapps = 0;
+  uint64_t vapps = 0;
   errno = 0;
   char *filename = NULL;
   msgd *msgd_handle = &androidmsgd_handle[DEFAULT_DOMAIN_ID];

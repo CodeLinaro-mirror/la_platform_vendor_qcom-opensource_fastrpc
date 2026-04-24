@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 
 //#ifndef VERIFY_PRINT_ERROR
@@ -124,8 +124,8 @@ int fastrpc_mem_init(void) {
 
   pthread_mutex_init(&fdlist.mut, 0);
   QList_Ctor(&fdlist.ql);
-  std_memset(dhandles, 0, sizeof(dhandles));
-  for (ii = 0; ii < NUM_DOMAINS_EXTEND; ii++) {
+  memset(dhandles, 0, sizeof(dhandles));
+  FOR_EACH_EFFECTIVE_DOMAIN_ID(ii) {
     QList_Ctor(&smaplst[ii].ql);
     pthread_mutex_init(&smaplst[ii].mut, 0);
   }
@@ -136,7 +136,7 @@ int fastrpc_mem_deinit(void) {
   int ii;
 
   pthread_mutex_destroy(&fdlist.mut);
-  for (ii = 0; ii < NUM_DOMAINS_EXTEND; ii++) {
+  FOR_EACH_EFFECTIVE_DOMAIN_ID(ii) {
     pthread_mutex_destroy(&smaplst[ii].mut);
   }
   return 0;
@@ -469,10 +469,9 @@ int fastrpc_mmap(int domain, int fd, void *vaddr, int offset, size_t length,
 
   // Get domain and open session if not already open
   if (domain == -1) {
-    PRINT_WARN_USE_DOMAINS();
     domain = get_current_domain();
   }
-  VERIFYC((domain >= 0) && (domain < NUM_DOMAINS_EXTEND), AEE_EBADPARM);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADPARM);
   FASTRPC_GET_REF(domain);
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_session_dev(domain, &dev)));
   VERIFYC(-1 != dev, AEE_ERPC);
@@ -551,10 +550,9 @@ int fastrpc_munmap(int domain, int fd, void *vaddr, size_t length) {
   FARF(RUNTIME_RPC_HIGH, "%s: domain %d fd %d vaddr %p length 0x%zx", __func__,
        domain, fd, vaddr, length);
   if (domain == -1) {
-    PRINT_WARN_USE_DOMAINS();
     domain = get_current_domain();
   }
-  VERIFYC(fd >= 0 && (domain >= 0) && (domain < NUM_DOMAINS_EXTEND),
+  VERIFYC(fd >= 0 && IS_VALID_EFFECTIVE_DOMAIN_ID(domain),
           AEE_EBADPARM);
   FASTRPC_GET_REF(domain);
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_session_dev(domain, &dev)));
@@ -633,10 +631,9 @@ int remote_mem_map(int domain, int fd, int flags, uint64_t vaddr, size_t size,
   VERIFYC(flags >= 0 && flags < REMOTE_MAP_MAX_FLAG && raddr != NULL,
           AEE_EBADPARM);
   if (domain == -1) {
-    PRINT_WARN_USE_DOMAINS();
     domain = get_current_domain();
   }
-  VERIFYC((domain >= 0) && (domain < NUM_DOMAINS_EXTEND), AEE_EBADPARM);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADPARM);
 
   FASTRPC_GET_REF(domain);
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_session_dev(domain, &dev)));
@@ -667,10 +664,9 @@ int remote_mem_unmap(int domain, uint64_t raddr, size_t size) {
   FARF(RUNTIME_RPC_HIGH, "%s: domain %d addr 0x%llx size 0x%zx", __func__,
        domain, raddr, size);
   if (domain == -1) {
-    PRINT_WARN_USE_DOMAINS();
     domain = get_current_domain();
   }
-  VERIFYC((domain >= 0) && (domain < NUM_DOMAINS_EXTEND), AEE_EBADPARM);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADPARM);
 
   FASTRPC_GET_REF(domain);
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_session_dev(domain, &dev)));
@@ -698,7 +694,7 @@ int remote_mmap64_internal(int fd, uint32_t flags, uint64_t vaddrin,
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_init_once()));
 
   domain = get_current_domain();
-  VERIFYC((domain >= 0) && (domain < NUM_DOMAINS_EXTEND), AEE_EBADDOMAIN);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADDOMAIN);
   FASTRPC_GET_REF(domain);
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_session_dev(domain, &dev)));
   VERIFYM(-1 != dev, AEE_ERPC, "Invalid device\n");
@@ -722,7 +718,6 @@ int remote_mmap64(int fd, uint32_t flags, uint64_t vaddrin, int64_t size,
 
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_init_once()));
 
-  PRINT_WARN_USE_DOMAINS();
   if (flags != 0) {
     nErr = AEE_EBADPARM;
     goto bail;
@@ -763,7 +758,7 @@ int remote_munmap64(uint64_t vaddrout, int64_t size) {
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_init_once()));
 
   domain = get_current_domain();
-  VERIFYC((domain >= 0) && (domain < NUM_DOMAINS_EXTEND), AEE_ERPC);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_ERPC);
 
   /* Don't open session in unmap. Return success if device already closed */
   FASTRPC_GET_REF(domain);
@@ -781,7 +776,6 @@ bail:
 }
 
 int remote_munmap(uint32_t vaddrout, int size) {
-  PRINT_WARN_USE_DOMAINS();
   return remote_munmap64((uintptr_t)vaddrout, (int64_t)size);
 }
 
@@ -789,7 +783,7 @@ static int fastrpc_unmap_fd(void *buf, size_t size, int fd, int attr) {
   int nErr = 0;
   int ii, dev = -1;
 
-  for (ii = 0; ii < NUM_DOMAINS_EXTEND; ii++) {
+  FOR_EACH_EFFECTIVE_DOMAIN_ID(ii) {
     nErr = fastrpc_session_get(ii);
     if(!nErr)
       continue;
@@ -829,7 +823,7 @@ static __inline void try_map_buffer(struct mem_to_fd *tofd) {
    * Tries to create static mapping on remote process of all open sessions.
    * Ignore errors in case of failure
    */
-  for (domain = 0; domain < NUM_DOMAINS_EXTEND; domain++) {
+  FOR_EACH_EFFECTIVE_DOMAIN_ID(domain) {
     nErr = fastrpc_mmap(domain, tofd->fd, tofd->buf, 0, tofd->size,
                         FASTRPC_MAP_STATIC);
     if (!nErr) {
@@ -858,7 +852,7 @@ static __inline int try_unmap_buffer(struct mem_to_fd *tofd) {
   FARF(RUNTIME_RPC_HIGH, "%s: fd %d", __func__, tofd->fd);
 
   /* Remove static mapping of a buffer for all domains */
-  for (domain = 0; domain < NUM_DOMAINS_EXTEND; domain++) {
+  FOR_EACH_EFFECTIVE_DOMAIN_ID(domain) {
     if (tofd->mapped[domain] == false) {
       continue;
     }
@@ -887,7 +881,7 @@ int fastrpc_mem_open(int domain) {
    * Initialize fastrpc session specific informaiton of the fastrpc_mem module
    */
   FARF(RUNTIME_RPC_HIGH, "%s for domain %d", __func__, domain);
-  VERIFYC((domain >= 0) && (domain < NUM_DOMAINS_EXTEND), AEE_EBADPARM);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADPARM);
 
   /* Map buffers with TRY_MAP_STATIC attribute that were allocated
    * and registered before a session was opened on a given domain.
@@ -920,7 +914,7 @@ int fastrpc_mem_close(int domain) {
   QNode *pn, *pnn;
 
   FARF(RUNTIME_RPC_HIGH, "%s for domain %d", __func__, domain);
-  VERIFYC((domain >= 0) && (domain < NUM_DOMAINS_EXTEND), AEE_EBADPARM);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADPARM);
 
   /**
    * Destroy fastrpc session specific information of the fastrpc_mem module.
@@ -960,7 +954,7 @@ int fastrpc_buffer_ref(int domain, int fd, int ref, void **va, size_t *size) {
   struct static_map *map = NULL;
   QNode *pn, *pnn;
 
-  if ((domain < 0) || (domain >= NUM_DOMAINS_EXTEND)) {
+  if (!IS_VALID_EFFECTIVE_DOMAIN_ID(domain)) {
     FARF(ERROR, "%s: invalid domain %d", __func__, domain);
     return AEE_EBADPARM;
   }

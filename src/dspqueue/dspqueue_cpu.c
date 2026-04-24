@@ -1,6 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
-
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef VERIFY_PRINT_ERROR
 #define VERIFY_PRINT_ERROR
@@ -26,6 +25,7 @@
 #include "fastrpc_apps_user.h"
 #include "fastrpc_internal.h"
 #include "fastrpc_mem.h"
+#include "fastrpc_context.h"
 #include "remote.h"
 #include "verify.h"
 #include <AEEStdErr.h>
@@ -33,7 +33,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
-#include <rpcmem.h>
+#include <rpcmem_internal.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -41,12 +41,13 @@
 struct dspqueue {
   unsigned id;
   int domain;
+  struct dspqueue_multidomain mdq;
   struct dspqueue_header *header;
   void *user_queue;
   int user_queue_fd;
   uint32_t user_queue_size;
   remote_handle64 dsp_handle;
-  uint64 dsp_id;
+  uint64_t dsp_id;
   uint16_t seq_no;
   pthread_mutex_t mutex;
   uint32_t read_packet_count;
@@ -136,8 +137,13 @@ static void *dspqueue_packet_callback_thread(void *arg);
 #define cache_flush_word(x)
 #define cache_invalidate_line(x)
 #define cache_flush_line(x)
+#ifdef __ARM_ARCH
 #define barrier_full() __asm__ __volatile__("dmb sy" : : : "memory")
 #define barrier_store() __asm__ __volatile__("dmb st" : : : "memory");
+#else
+#define barrier_full() /* FIXME */
+#define barrier_store() /* FIXME */
+#endif
 #define cache_flush(a, l)
 #define cache_invalidate(a, l)
 #define cache_flush_invalidate(a, l)
@@ -183,7 +189,7 @@ static AEEResult init_domain_queues_locked(int domain) {
   uint32_t cap = 0;
 
   errno = 0;
-  assert(domain < NUM_DOMAINS_EXTEND);
+  assert(IS_VALID_EFFECTIVE_DOMAIN_ID(domain));
   if (queues->domain_queues[domain] != NULL) {
     return AEE_SUCCESS;
   }
@@ -192,17 +198,21 @@ static AEEResult init_domain_queues_locked(int domain) {
   dq->domain = domain;
 
   /* Get URI of session */
-  dspqueue_skel.domain_name_len = strlen(CDSP_DOMAIN_NAME) + 1;
+  dspqueue_skel.domain_name_len = (dom == CDSP1_DOMAIN_ID) ?
+      strlen(CDSP1_DOMAIN_NAME) + 1 : strlen(CDSP_DOMAIN_NAME) + 1;
   VERIFYC((dspqueue_skel.domain_name = (char *)calloc(
                dspqueue_skel.domain_name_len, sizeof(char))) != NULL,
           AEE_ENOMEMORY);
 
   // Open session on the right DSP
   if (dom == CDSP_DOMAIN_ID) {
-    std_strlcpy(dspqueue_skel.domain_name, CDSP_DOMAIN_NAME,
+    strlcpy(dspqueue_skel.domain_name, CDSP_DOMAIN_NAME,
                 dspqueue_skel.domain_name_len);
   } else if (dom == ADSP_DOMAIN_ID) {
-    std_strlcpy(dspqueue_skel.domain_name, ADSP_DOMAIN_NAME,
+    strlcpy(dspqueue_skel.domain_name, ADSP_DOMAIN_NAME,
+                dspqueue_skel.domain_name_len);
+  } else if (dom == CDSP1_DOMAIN_ID) {
+    strlcpy(dspqueue_skel.domain_name, CDSP1_DOMAIN_NAME,
                 dspqueue_skel.domain_name_len);
   } else {
     nErr = AEE_EUNSUPPORTED;
@@ -215,7 +225,7 @@ static AEEResult init_domain_queues_locked(int domain) {
   VERIFYC((dspqueue_skel.module_uri = (char *)calloc(
                dspqueue_skel.module_uri_len, sizeof(char))) != NULL,
           AEE_ENOMEMORY);
-  std_strlcpy(dspqueue_skel.module_uri, dspqueue_rpc_URI,
+  strlcpy(dspqueue_skel.module_uri, dspqueue_rpc_URI,
               dspqueue_skel.module_uri_len);
 
   /* One extra character for NULL termination is already part of module_uri_len
@@ -230,7 +240,9 @@ static AEEResult init_domain_queues_locked(int domain) {
          "Error 0x%x: %s: obtaining session URI for %s on domain %d, session "
          "%u failed\n",
          nErr, __func__, dspqueue_rpc_URI, domain, dspqueue_skel.session_id);
-    nErr = AEE_EUNSUPPORTED;
+    /* In case of failure due to SSR, return corresponding error to client */
+    if (nErr != AEE_ECONNRESET)
+      nErr = AEE_EUNSUPPORTED;
     goto bail;
   }
 
@@ -239,7 +251,9 @@ static AEEResult init_domain_queues_locked(int domain) {
          "dspqueue_rpc_open failed with %x on domain %d - packet queue support "
          "likely not present on DSP",
          nErr, domain);
-    nErr = AEE_EUNSUPPORTED;
+    /* In case of failure due to SSR, return corresponding error to client */
+    if (nErr != AEE_ECONNRESET)
+      nErr = AEE_EUNSUPPORTED;
     goto bail;
   }
 
@@ -263,7 +277,7 @@ static AEEResult init_domain_queues_locked(int domain) {
   }
 
   // Allocate shared state structure and pass to DSP
-  VERIFYC((dq->state = rpcmem_alloc(
+  VERIFYC((dq->state = rpcmem_alloc_internal(
                RPCMEM_HEAP_ID_SYSTEM, RPCMEM_DEFAULT_FLAGS | RPCMEM_HEAP_NOREG,
                sizeof(struct dspqueue_process_queue_state))) != NULL,
           AEE_ENORPCMEMORY);
@@ -365,7 +379,7 @@ static AEEResult destroy_domain_queues_locked(int domain) {
 
   errno = 0;
   FARF(HIGH, "destroy_domain_queues_locked");
-  assert(domain < NUM_DOMAINS_EXTEND);
+  assert(IS_VALID_EFFECTIVE_DOMAIN_ID(domain));
   assert(queues->domain_queues[domain] != NULL);
   dq = queues->domain_queues[domain];
   assert(dq->num_queues == 0);
@@ -447,12 +461,11 @@ AEEResult dspqueue_create(int domain, uint32_t flags, uint32_t req_queue_size,
   errno = 0;
 
   if (domain == -1) {
-    PRINT_WARN_USE_DOMAINS();
     domain = get_current_domain();
-    if ((domain < 0) || (domain >= NUM_DOMAINS_EXTEND)) {
+    if (!IS_VALID_EFFECTIVE_DOMAIN_ID(domain)) {
       return AEE_ERPC;
     }
-  } else if ((domain < 0) || (domain >= NUM_DOMAINS_EXTEND)) {
+  } else if (!IS_VALID_EFFECTIVE_DOMAIN_ID(domain)) {
     return AEE_EBADPARM;
   }
 
@@ -536,7 +549,7 @@ AEEResult dspqueue_create(int domain, uint32_t flags, uint32_t req_queue_size,
       CACHE_ALIGN_SIZE(req_queue_size) + CACHE_ALIGN_SIZE(resp_queue_size);
 
   // Allocate queue shared memory and map to DSP
-  VERIFYC((q->user_queue = rpcmem_alloc(
+  VERIFYC((q->user_queue = rpcmem_alloc_internal(
                RPCMEM_HEAP_ID_SYSTEM, RPCMEM_DEFAULT_FLAGS | RPCMEM_HEAP_NOREG,
                q->user_queue_size)) != NULL,
           AEE_ENOMEMORY);
@@ -593,7 +606,7 @@ AEEResult dspqueue_create(int domain, uint32_t flags, uint32_t req_queue_size,
   // not support wait counts in the header, driver signaling, or any other
   // post-v1 features. Unfortunately the initial DSP codebase ignores the
   // version and flags...
-  q->header->version = MAX_UINT32;
+  q->header->version = UINT32_MAX;
   nErr = dspqueue_rpc_create_queue(dq->dsp_handle, q->id, q->user_queue_fd,
                                    queue_count, &q->dsp_id);
   if ((nErr == AEE_EUNSUPPORTED) ||
@@ -732,6 +745,60 @@ bail:
   return nErr;
 }
 
+/*
+ * Clean-up multi-domain queue
+ * This function calls 'dspqueue_close' on each individual queue.
+ */
+static int dspqueue_multidomain_close(struct dspqueue *q, bool queue_mut) {
+	int nErr = AEE_SUCCESS, err = AEE_SUCCESS;
+	struct dspqueue_multidomain *mdq = NULL;
+	dspqueue_t queue = NULL;
+
+	VERIFYC(q, AEE_EBADPARM);
+
+	mdq = &q->mdq;
+	VERIFYC(mdq->is_mdq, AEE_EINVALIDITEM);
+
+	if (queue_mut) {
+		pthread_mutex_lock(&q->mutex);
+	}
+
+	// Close individual queues
+	for (unsigned int ii = 0; ii < mdq->num_domain_ids; ii++) {
+		queue = mdq->queues[ii];
+		if (!queue)
+			continue;
+
+		err = dspqueue_close(queue);
+		if (err) {
+			// Return the first failure's error code to client
+			nErr = nErr ? nErr : err;
+		}
+	}
+	if (mdq->effec_domain_ids) {
+		free(mdq->effec_domain_ids);
+	}
+	if (mdq->queues) {
+		free(mdq->queues);
+	}
+	if (mdq->dsp_ids) {
+		free(mdq->dsp_ids);
+	}
+	if (queue_mut) {
+		pthread_mutex_unlock(&q->mutex);
+		pthread_mutex_destroy(&q->mutex);
+	}
+	FARF(ALWAYS, "%s: closed queue %p (ctx 0x%"PRIx64"), num domains %u",
+		__func__, q, mdq->ctx, mdq->num_domain_ids);
+	free(q);
+bail:
+	if (nErr) {
+		FARF(ALWAYS, "Error 0x%x: %s: failed for queue %p",
+			nErr, __func__, q);
+	}
+	return nErr;
+}
+
 AEEResult dspqueue_close(dspqueue_t queue) {
 
   struct dspqueue *q = queue;
@@ -742,7 +809,13 @@ AEEResult dspqueue_close(dspqueue_t queue) {
 
   errno = 0;
   VERIFYC(q, AEE_EBADPARM);
-  VERIFYC(q->domain >= 0 && q->domain < NUM_DOMAINS_EXTEND, AEE_EINVALIDDOMAIN);
+
+  if (q->mdq.is_mdq) {
+    // Recursively call 'dspqueue_close' on each individual queue
+    return dspqueue_multidomain_close(q, true);
+  }
+
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(q->domain), AEE_EINVALIDDOMAIN);
   pthread_mutex_lock(&queues->mutex);
   dq = queues->domain_queues[q->domain];
   if (dq == NULL) {
@@ -786,11 +859,17 @@ AEEResult dspqueue_close(dspqueue_t queue) {
 
   // Cancel any outstanding blocking read/write calls (from callback threads)
   if (q->have_driver_signaling) {
-    // Cancel driver signal waits
-    for (i = 0; i < DSPQUEUE_NUM_SIGNALS; i++) {
-      nErr = dspsignal_cancel_wait(q->domain, QUEUE_SIGNAL(q->id, i));
-      if (nErr && nErr != AEE_EBADSTATE) {
-        goto bail;
+    /*
+     * Cancel driver signal waits
+     * Not required in case of SSR (i.e AEE_ECONNRESET)
+     * as signals are cancelled by the SSR handle.
+     */
+    if (dq->dsp_error != AEE_ECONNRESET) {
+      for (i = 0; i < DSPQUEUE_NUM_SIGNALS; i++) {
+        nErr = dspsignal_cancel_wait(q->domain, QUEUE_SIGNAL(q->id, i));
+        if (nErr && nErr != AEE_EBADSTATE) {
+          goto bail;
+        }
       }
     }
   } else {
@@ -831,13 +910,19 @@ AEEResult dspqueue_close(dspqueue_t queue) {
                                   q->user_queue_size)) == 0);
   }
   rpcmem_free(q->user_queue);
-
+  /*
+   * In case of SSR (i.e., AEE_ECONNRESET), there is no need to call
+   * dspsignal_destroy as the process close during SSR cleans up
+   * signals.
+   */
   if (q->have_driver_signaling) {
-    FARF(MEDIUM, "%s: Destroy signals", __func__);
-    for (i = 0; i < DSPQUEUE_NUM_SIGNALS; i++) {
-      nErr = dspsignal_destroy(q->domain, QUEUE_SIGNAL(q->id, i));
-      if (nErr && nErr != AEE_EBADSTATE) {
-        goto bail;
+    if (dq->dsp_error != AEE_ECONNRESET) {
+      FARF(MEDIUM, "%s: Destroy signals", __func__);
+      for (i = 0; i < DSPQUEUE_NUM_SIGNALS; i++) {
+        nErr = dspsignal_destroy(q->domain, QUEUE_SIGNAL(q->id, i));
+        if (nErr && nErr != AEE_EBADSTATE) {
+          goto bail;
+        }
       }
     }
   }
@@ -885,8 +970,116 @@ bail:
 AEEResult dspqueue_export(dspqueue_t queue, uint64_t *queue_id) {
 
   struct dspqueue *q = queue;
+
+  if (q->mdq.is_mdq) {
+    FARF(ALWAYS, "Warning: %s not supported for multi-domain queue, already exported during create",
+            __func__);
+    return AEE_EUNSUPPORTED;
+  }
   *queue_id = q->dsp_id;
   return AEE_SUCCESS;
+}
+
+static int dspqueue_multidomain_create(dspqueue_create_req *create) {
+	int nErr = AEE_SUCCESS;
+	bool queue_mut = false;
+	unsigned int *effec_domain_ids = NULL;
+	unsigned int num_domain_ids = 0, size = 0;
+	struct dspqueue *q = NULL;
+	struct dspqueue_multidomain *mdq = NULL;
+
+	VERIFY(AEE_SUCCESS == (nErr = fastrpc_context_get_domains(create->ctx,
+		&effec_domain_ids, &num_domain_ids)));
+
+	// Validate output parameter pointers
+	VERIFYC(create->ids && !create->priority && !create->flags,
+		AEE_EBADPARM);
+	VERIFYC(create->num_ids >= num_domain_ids, AEE_EBADPARM);
+
+	create->queue = NULL;
+	size = create->num_ids * sizeof(*(create->ids));
+	memset(create->ids, 0, size);
+	errno = 0;
+
+	VERIFYC(AEE_SUCCESS == (nErr = pthread_once(&queues_once,
+		init_process_queues_once)), AEE_ENOTINITIALIZED);
+
+	// Alloc & init queue struct
+	VERIFYC(NULL != (q = calloc(1, sizeof(*q))), AEE_ENOMEMORY);
+	mdq = &q->mdq;
+	mdq->is_mdq = true;
+	mdq->ctx = create->ctx;
+
+	VERIFYC(AEE_SUCCESS == (nErr = pthread_mutex_init(&q->mutex, NULL)),
+		AEE_ENOTINITIALIZED);
+	queue_mut = true;
+
+	// Alloc & init multi-domain queue specific info
+	mdq->num_domain_ids = num_domain_ids;
+
+	size = num_domain_ids * sizeof(*(mdq->effec_domain_ids));
+	VERIFYC(NULL != (mdq->effec_domain_ids = calloc(1, size)),
+		AEE_ENOMEMORY);
+	memcpy(mdq->effec_domain_ids, effec_domain_ids, size);
+
+	VERIFYC(NULL != (mdq->queues = calloc(num_domain_ids,
+		sizeof(*(mdq->queues)))), AEE_ENOMEMORY);
+
+	size = num_domain_ids * sizeof(*(mdq->dsp_ids));
+	VERIFYC(NULL != (mdq->dsp_ids = calloc(1, size)), AEE_ENOMEMORY);
+
+	// Create queue on each individual domain
+	for (unsigned int ii = 0; ii < num_domain_ids; ii++) {
+		VERIFY(AEE_SUCCESS == (nErr = dspqueue_create(effec_domain_ids[ii],
+			create->flags, create->req_queue_size, create->resp_queue_size,
+			create->packet_callback, create->error_callback,
+			create->callback_context, &mdq->queues[ii])));
+
+		// Export queue and get queue id for that domain
+		VERIFY(AEE_SUCCESS == (nErr = dspqueue_export(mdq->queues[ii],
+			&mdq->dsp_ids[ii])));
+	}
+
+	// Return queue handle and list of queue ids to user
+	create->queue = q;
+	memcpy(create->ids, mdq->dsp_ids, size);
+
+	FARF(ALWAYS, "%s: created queue %p for ctx 0x%"PRIx64", sizes: req %u, rsp %u, num domains %u",
+		__func__, q, create->ctx, create->req_queue_size,
+			create->resp_queue_size, num_domain_ids);
+bail:
+	if (nErr) {
+		FARF(ERROR, "Error 0x%x: %s failed for ctx 0x%"PRIx64", queue sizes: req %u, rsp %u, num ids %u",
+			nErr, __func__, create->ctx, create->req_queue_size,
+			create->resp_queue_size, create->num_ids);
+
+		dspqueue_multidomain_close(q, queue_mut);
+	}
+	return nErr;
+}
+
+int dspqueue_request(dspqueue_request_payload *req) {
+	int nErr = AEE_SUCCESS, req_id = -1;
+
+	VERIFYC(req, AEE_EBADPARM);
+	req_id = req->id;
+
+	switch(req_id) {
+		case DSPQUEUE_CREATE:
+		{
+			VERIFY(AEE_SUCCESS == (nErr =
+				dspqueue_multidomain_create(&req->create)));
+			break;
+		}
+		default:
+			nErr = AEE_EUNSUPPORTED;
+			break;
+	}
+bail:
+	if (nErr)
+		FARF(ALWAYS, "Error 0x%x: %s failed", nErr, __func__);
+
+	return nErr;
 }
 
 static void get_queue_state_write(void *memory,
@@ -1126,6 +1319,59 @@ bail:
   return nErr;
 }
 
+/* Write packet to multi-domain queue */
+static int dspqueue_multidomain_write(struct dspqueue *q, uint32_t flags,
+	uint32_t num_buffers, struct dspqueue_buffer *buffers,
+	uint32_t message_length, const uint8_t *message,
+	uint32_t timeout_us, bool block) {
+	int nErr = AEE_SUCCESS;
+	struct dspqueue_multidomain *mdq = NULL;
+	bool locked = false;
+
+	VERIFYC(q, AEE_EBADPARM);
+
+	mdq = &q->mdq;
+	VERIFYC(mdq->is_mdq, AEE_EINVALIDITEM);
+
+	// Only one multi-domain write request at a time.
+	pthread_mutex_lock(&q->mutex);
+	locked = true;
+
+	// Write packet to individual queues
+	for (unsigned int ii = 0; ii < mdq->num_domain_ids; ii++) {
+		if (block) {
+			/*
+			 * Multi-domain blocking write operation will serially block
+			 * on each individual queue.
+			 */
+			VERIFY(AEE_SUCCESS == (nErr = dspqueue_write(mdq->queues[ii],
+				flags, num_buffers, buffers, message_length, message,
+				timeout_us)));
+		} else {
+			VERIFY(AEE_SUCCESS == (nErr = dspqueue_write_noblock(
+				mdq->queues[ii], flags, num_buffers, buffers,
+				message_length, message)));
+		}
+	}
+bail:
+	if (locked)
+		pthread_mutex_unlock(&q->mutex);
+
+	if (nErr) {
+		/*
+		 * If multi-domain write operation failed on some but not all
+		 * queues, then the MDQ is now in an irrecoverable bad-state as
+		 * the packet was partially written to some domains but not all
+		 * and it cannot be "erased". Client is expected to close queue.
+		 */
+		nErr = AEE_EBADSTATE;
+		FARF(ERROR, "Error 0x%x: %s (block %d): failed for queue %p, flags 0x%x, num bufs %u, msg len %u, timeout %u",
+			nErr, __func__, block, q, flags, num_buffers,
+			message_length, timeout_us);
+	}
+	return nErr;
+}
+
 AEEResult dspqueue_write_noblock(dspqueue_t queue, uint32_t flags,
                                  uint32_t num_buffers,
                                  struct dspqueue_buffer *buffers,
@@ -1134,25 +1380,34 @@ AEEResult dspqueue_write_noblock(dspqueue_t queue, uint32_t flags,
 
   AEEResult nErr = AEE_SUCCESS;
   struct dspqueue *q = queue;
-  struct dspqueue_packet_queue_header *pq = &q->header->req_queue;
-  volatile uint8_t *qp =
-      (volatile uint8_t *)(((uintptr_t)q->header) + pq->queue_offset);
-  struct dspqueue_packet_queue_state *read_state =
-      (struct dspqueue_packet_queue_state *)(((uintptr_t)q->header) +
-                                             pq->read_state_offset);
-  struct dspqueue_packet_queue_state *write_state =
-      (struct dspqueue_packet_queue_state *)(((uintptr_t)q->header) +
-                                             pq->write_state_offset);
-  struct dspqueue_domain_queues *dq = queues->domain_queues[q->domain];
+  struct dspqueue_packet_queue_header *pq = NULL;
+  volatile uint8_t *qp = NULL;
+  struct dspqueue_packet_queue_state *read_state = NULL;
+  struct dspqueue_packet_queue_state *write_state = NULL;
+  struct dspqueue_domain_queues *dq = NULL;
   unsigned len, alen;
   uint32_t r, w;
-  uint32_t qleft;
-  uint32_t qsize = pq->queue_length;
+  uint32_t qleft = 0, qsize = 0;
   int locked = 0;
   uint64_t phdr;
   int wrap = 0;
   uint32_t i;
   uint32_t buf_refs = 0;
+
+  if (q->mdq.is_mdq) {
+    // Recursively call 'dspqueue_write_noblock' on individual queues
+    return dspqueue_multidomain_write(q, flags, num_buffers, buffers,
+              message_length, message, 0, false);
+  }
+
+  pq = &q->header->req_queue;
+  qp = (volatile uint8_t*) (((uintptr_t)q->header) + pq->queue_offset);
+  read_state = (struct dspqueue_packet_queue_state*) (((uintptr_t)q->header)
+                        + pq->read_state_offset);
+  write_state = (struct dspqueue_packet_queue_state*) (((uintptr_t)q->header)
+                        + pq->write_state_offset);
+  dq = queues->domain_queues[q->domain];
+  qsize = pq->queue_length;
 
   // Check properties
   VERIFYC(num_buffers <= DSPQUEUE_MAX_BUFFERS, AEE_EBADPARM);
@@ -1280,6 +1535,7 @@ AEEResult dspqueue_write_noblock(dspqueue_t queue, uint32_t flags,
   cache_flush_word(&dq->state->req_packet_count[q->id]);
   if (q->have_wait_counts) {
     // Only send a signal if the other end is potentially waiting
+    barrier_full();
     cache_invalidate_word(&read_state->wait_count);
     if (read_state->wait_count) {
       FARF(MEDIUM, "%s: Send signal", __func__);
@@ -1339,16 +1595,25 @@ AEEResult dspqueue_write(dspqueue_t queue, uint32_t flags, uint32_t num_buffers,
 
   AEEResult nErr = AEE_SUCCESS;
   struct dspqueue *q = queue;
-  struct dspqueue_packet_queue_header *pq = &q->header->req_queue;
-  struct dspqueue_packet_queue_state *write_state =
-      (struct dspqueue_packet_queue_state *)(((uintptr_t)q->header) +
-                                             pq->write_state_offset);
-  _Atomic uint32_t *wait_count = (_Atomic uint32_t *)&write_state->wait_count;
+  struct dspqueue_packet_queue_header *pq = NULL;
+  struct dspqueue_packet_queue_state *write_state = NULL;
+  _Atomic uint32_t *wait_count = NULL;
   int waiting = 0;
   struct timespec *timeout_ts = NULL; // no timeout by default
   struct timespec ts;
 
   errno = 0;
+  if (q->mdq.is_mdq) {
+    // Recursively call 'dspqueue_write' on individual queues.
+    return dspqueue_multidomain_write(q, flags, num_buffers, buffers,
+                    message_length, message, timeout_us, true);
+  }
+
+  pq = &q->header->req_queue;
+  write_state = (struct dspqueue_packet_queue_state*)(((uintptr_t)q->header)
+                        + pq->write_state_offset);
+  wait_count = (_Atomic uint32_t*) &write_state->wait_count;
+
   pthread_mutex_lock(&q->space_mutex);
 
   // Try a write first before dealing with timeouts
@@ -1411,13 +1676,16 @@ AEEResult dspqueue_write_early_wakeup_noblock(dspqueue_t queue,
                                               uint32_t packet_flags) {
 
   uint32_t flags = packet_flags | DSPQUEUE_PACKET_FLAG_WAKEUP;
+  struct dspqueue *q = queue;
+  const uint8_t *msg = wakeup_delay ? (const uint8_t *)&wakeup_delay : NULL;
+  uint32_t msg_len = wakeup_delay ? sizeof(wakeup_delay) : 0;
 
-  if (wakeup_delay != 0) {
-    return dspqueue_write_noblock(queue, flags, 0, NULL, 4,
-                                  (const uint8_t *)&wakeup_delay);
-  } else {
-    return dspqueue_write_noblock(queue, flags, 0, NULL, 0, NULL);
+  if (q->mdq.is_mdq) {
+    // Recursively call 'dspqueue_write_noblock' on individual queues
+    return dspqueue_multidomain_write(q, flags, 0, NULL,
+                msg_len, msg, 0, false);
   }
+  return dspqueue_write_noblock(queue, flags, 0, NULL, msg_len, msg);
 }
 
 static AEEResult peek_locked(volatile const uint8_t *qp, uint32_t r,
@@ -1463,17 +1731,121 @@ bail:
   return nErr;
 }
 
+/*
+ * Read / peek packet from multi-domain queue
+ *
+ * Individual queue of each domain will be read / peeked in a serial
+ * manner. Packet / packet info will be returned from the first queue
+ * where a valid packet is found.
+ *
+ * If multiple domains have written responses to their queues, then client
+ * is expected to call dspqueue_read on the multi-domain queue as many
+ * times to consume all the packets.
+ *
+ * In case of peeking, client is expected to read the packet already
+ * peeked before peeking the next packet.
+ *
+ * If all the individual queues are empty, then no packet is read.
+ */
+static int dspqueue_multidomain_read(struct dspqueue *q, uint32_t *flags,
+	uint32_t max_buffers, uint32_t *num_buffers,
+	struct dspqueue_buffer *buffers,
+	uint32_t max_message_length, uint32_t *message_length,
+	uint8_t *message, uint32_t timeout_us, bool read, bool block) {
+	int nErr = AEE_SUCCESS;
+	struct dspqueue_multidomain *mdq = NULL;
+	bool locked = false;
+	dspqueue_t cq = NULL;
+
+	VERIFYC(q, AEE_EBADPARM);
+
+	mdq = &q->mdq;
+	VERIFYC(mdq->is_mdq, AEE_EINVALIDITEM);
+
+	if (block && mdq->num_domain_ids > 1) {
+		/*
+		 * Blocked read cannot be supported on multi-domain queues because
+		 * the read operation is done in a serial manner on the individual
+		 * queues of each domain and the first queue with a valid packet
+		 * is returned to client.
+		 * Say if the first domain's queue does not have any response
+		 * packets to consume but the second domain's queue does, then
+		 * the read call will just block indefinitely on the first queue
+		 * without ever checking the subsequence queues.
+		 */
+		 nErr = AEE_EUNSUPPORTED;
+		 FARF(ALWAYS, "Error 0x%x: %s: not supported for multi-domain queue %p",
+				nErr, __func__, q);
+		 return nErr;
+	}
+	// Only one multi-domain read request at a time.
+	pthread_mutex_lock(&q->mutex);
+	locked = true;
+
+	// Read packet from individual queues
+	for (unsigned int ii = 0; ii < mdq->num_domain_ids; ii++) {
+		cq = mdq->queues[ii];
+		if (read) {
+			if (block) {
+				nErr = dspqueue_read(cq, flags, max_buffers,
+						num_buffers, buffers, max_message_length,
+						message_length, message, timeout_us);
+			} else {
+				nErr = dspqueue_read_noblock(cq, flags,
+						max_buffers, num_buffers, buffers,
+						max_message_length, message_length, message);
+			}
+		} else {
+			if (block) {
+				nErr = dspqueue_peek(cq, flags,
+						num_buffers, message_length, timeout_us);
+			} else {
+				nErr = dspqueue_peek_noblock(cq, flags,
+						num_buffers, message_length);
+			}
+		}
+		if (!nErr) {
+			// Packet found in an individual queue
+			break;
+		} else if (nErr == AEE_EWOULDBLOCK) {
+			// If queue is empty, proceed to next queue
+			continue;
+		} else {
+			// If any queue is in bad state, bail out with error
+			goto bail;
+		}
+	}
+bail:
+	if (locked)
+		pthread_mutex_unlock(&q->mutex);
+
+	if (nErr && nErr != AEE_EWOULDBLOCK) {
+		FARF(ALWAYS, "Error 0x%x: %s (read %d, block %d): failed for queue %p, max bufs %u, max msg len %u",
+			nErr, __func__, read, block, q, max_buffers, max_message_length);
+	}
+	return nErr;
+}
+
 AEEResult dspqueue_peek_noblock(dspqueue_t queue, uint32_t *flags,
                                 uint32_t *num_buffers,
                                 uint32_t *message_length) {
 
   AEEResult nErr = AEE_SUCCESS;
   struct dspqueue *q = queue;
-  struct dspqueue_packet_queue_header *pq = &q->header->resp_queue;
-  volatile const uint8_t *qp =
-      (volatile const uint8_t *)(((uintptr_t)q->header) + pq->queue_offset);
+  struct dspqueue_packet_queue_header *pq = NULL;
+  volatile const uint8_t *qp = NULL;
   uint32_t r, qleft;
   int locked = 0;
+
+  if (q->mdq.is_mdq) {
+    // Recursively call 'dspqueue_peek_noblock' on individual queues
+    return dspqueue_multidomain_read(q, flags, 0, num_buffers,
+              NULL, 0, message_length, NULL, 0, false, false);
+  }
+
+  pq = &q->header->resp_queue;
+  qp = (volatile const uint8_t*) (((uintptr_t)q->header)
+              + pq->queue_offset);
 
   pthread_mutex_lock(&q->mutex);
   locked = 1;
@@ -1505,14 +1877,23 @@ AEEResult dspqueue_peek(dspqueue_t queue, uint32_t *flags,
 
   AEEResult nErr = AEE_SUCCESS;
   struct dspqueue *q = queue;
-  struct dspqueue_packet_queue_header *pq = &q->header->resp_queue;
-  struct dspqueue_packet_queue_state *read_state =
-      (struct dspqueue_packet_queue_state *)(((uintptr_t)q->header) +
-                                             pq->read_state_offset);
-  _Atomic uint32_t *wait_count = (_Atomic uint32_t *)&read_state->wait_count;
+  struct dspqueue_packet_queue_header *pq = NULL;
+  struct dspqueue_packet_queue_state *read_state = NULL;
+  _Atomic uint32_t *wait_count = NULL;
   int waiting = 0;
   struct timespec *timeout_ts = NULL; // no timeout by default
   struct timespec ts;
+
+  if (q->mdq.is_mdq) {
+    // Recursively call 'dspqueue_read_noblock' on individual queues
+    return dspqueue_multidomain_read(q, flags, 0, num_buffers,
+            NULL, 0, message_length, NULL, timeout_us, false, true);
+  }
+
+  pq = &q->header->resp_queue;
+  read_state =(struct dspqueue_packet_queue_state *) (((uintptr_t)q->header)
+                      + pq->read_state_offset);
+  wait_count = (_Atomic uint32_t *) &read_state->wait_count;
 
   pthread_mutex_lock(&q->packet_mutex);
 
@@ -1600,19 +1981,13 @@ AEEResult dspqueue_read_noblock(dspqueue_t queue, uint32_t *flags,
 
   AEEResult nErr = AEE_SUCCESS;
   struct dspqueue *q = queue;
-  struct dspqueue_domain_queues *dq = queues->domain_queues[q->domain];
-  struct dspqueue_packet_queue_header *pq = &q->header->resp_queue;
-  volatile const uint8_t *qp =
-      (volatile const uint8_t *)(((uintptr_t)q->header) + pq->queue_offset);
-  struct dspqueue_packet_queue_state *read_state =
-      (struct dspqueue_packet_queue_state *)(((uintptr_t)q->header) +
-                                             pq->read_state_offset);
-  struct dspqueue_packet_queue_state *write_state =
-      (struct dspqueue_packet_queue_state *)(((uintptr_t)q->header) +
-                                             pq->write_state_offset);
+  struct dspqueue_domain_queues *dq = NULL;
+  struct dspqueue_packet_queue_header *pq = NULL;
+  volatile const uint8_t *qp = NULL;
+  struct dspqueue_packet_queue_state *read_state = NULL;
+  struct dspqueue_packet_queue_state *write_state = NULL;
   uint32_t r, qleft;
-  uint32_t f, num_b, msg_l;
-  uint32_t qsize = pq->queue_length;
+  uint32_t f, num_b, msg_l, qsize = 0;
   uint32_t len;
   int locked = 0;
   unsigned i;
@@ -1620,6 +1995,23 @@ AEEResult dspqueue_read_noblock(dspqueue_t queue, uint32_t *flags,
   uint64_t header;
 
   errno = 0;
+
+if (q->mdq.is_mdq) {
+        // Recursively call 'dspqueue_read_noblock' on individual queues
+        return dspqueue_multidomain_read(q, flags, max_buffers,
+                num_buffers, buffers, max_message_length,
+                message_length, message, 0, true, false);
+    }
+
+  dq = queues->domain_queues[q->domain];
+  pq = &q->header->resp_queue;
+  qp = (volatile const uint8_t *) (((uintptr_t)q->header) + pq->queue_offset);
+  read_state = (struct dspqueue_packet_queue_state *) (((uintptr_t)q->header)
+                        + pq->read_state_offset);
+  write_state = (struct dspqueue_packet_queue_state *) (((uintptr_t)q->header)
+                        + pq->write_state_offset);
+  qsize = pq->queue_length;
+
   pthread_mutex_lock(&q->mutex);
   locked = 1;
 
@@ -1882,14 +2274,24 @@ AEEResult dspqueue_read(dspqueue_t queue, uint32_t *flags, uint32_t max_buffers,
 
   AEEResult nErr = AEE_SUCCESS;
   struct dspqueue *q = queue;
-  struct dspqueue_packet_queue_header *pq = &q->header->resp_queue;
-  struct dspqueue_packet_queue_state *read_state =
-      (struct dspqueue_packet_queue_state *)(((uintptr_t)q->header) +
-                                             pq->read_state_offset);
-  _Atomic uint32_t *wait_count = (_Atomic uint32_t *)&read_state->wait_count;
+  struct dspqueue_packet_queue_header *pq = NULL;
+  struct dspqueue_packet_queue_state *read_state = NULL;
+  _Atomic uint32_t *wait_count = NULL;
   int waiting = 0;
   struct timespec *timeout_ts = NULL; // no timeout by default
   struct timespec ts;
+
+  if (q->mdq.is_mdq) {
+    // Recursively call 'dspqueue_read_noblock' on individual queues
+    return dspqueue_multidomain_read(q, flags, max_buffers,
+                  num_buffers, buffers, max_message_length,
+                  message_length, message, timeout_us, true, true);
+  }
+
+  pq = &q->header->resp_queue;
+  read_state = (struct dspqueue_packet_queue_state *) (((uintptr_t)q->header)
+                          + pq->read_state_offset);
+  wait_count = (_Atomic uint32_t *) &read_state->wait_count;
 
   pthread_mutex_lock(&q->packet_mutex);
 
@@ -1944,11 +2346,53 @@ bail:
   return nErr;
 }
 
+/* Get stats of multi-domain queue */
+static int dspqueue_multidomain_get_stat(struct dspqueue *q,
+	enum dspqueue_stat stat, uint64_t *value) {
+	int nErr = AEE_SUCCESS;
+	struct dspqueue_multidomain *mdq = NULL;
+	bool locked = false;
+
+	VERIFYC(q, AEE_EBADPARM);
+
+	mdq = &q->mdq;
+	VERIFYC(mdq->is_mdq, AEE_EINVALIDITEM);
+
+	if (mdq->num_domain_ids > 1) {
+		/* Stats requests are not supported for multi-domain queues */
+		nErr = AEE_EUNSUPPORTED;
+		goto bail;
+	}
+
+	// Only one multi-domain stats request at a time.
+	pthread_mutex_lock(&q->mutex);
+	locked = true;
+
+	/*
+	 * Always return stats from first queue only as this api is currently
+	 * supported for single-domain queues only.
+	 */
+	VERIFY(AEE_SUCCESS == (nErr = dspqueue_get_stat(mdq->queues[0],
+		stat, value)));
+bail:
+	if (locked)
+		pthread_mutex_unlock(&q->mutex);
+
+	if (nErr) {
+		FARF(ALWAYS, "Error 0x%x: %s: failed for queue %p, stat %d",
+			nErr, __func__, q, stat);
+	}
+	return nErr;
+}
+
 AEEResult dspqueue_get_stat(dspqueue_t queue, enum dspqueue_stat stat,
                             uint64_t *value) {
 
   AEEResult nErr = 0;
   struct dspqueue *q = queue;
+
+  if (q->mdq.is_mdq)
+    return dspqueue_multidomain_get_stat(q, stat, value);
 
   pthread_mutex_lock(&q->mutex);
 
@@ -2285,7 +2729,7 @@ static int dspqueue_notif_callback(void *context, int domain, int session,
   }
   FARF(ALWAYS, "%s for domain %d, session %d, status %u", __func__, domain,
        session, status);
-  assert(effec_domain_id < NUM_DOMAINS_EXTEND);
+  assert(IS_VALID_EFFECTIVE_DOMAIN_ID(effec_domain_id));
 
   // Send different error codes for SSR and remote-process exit
   nErr = (status == FASTRPC_DSP_SSR) ? AEE_ECONNRESET : AEE_ENOSUCH;

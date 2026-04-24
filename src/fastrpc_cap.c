@@ -1,11 +1,12 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 
 #define FARF_ERROR 1
 
@@ -20,13 +21,13 @@
 
 #define BUF_SIZE 50
 
-const char * RPROC_SUBSYSTEM_NAME[] = {"adsp", "mss", "spss", "cdsp"};
+const char * RPROC_SUBSYSTEM_NAME[] = {"adsp", "mss", "spss", "cdsp", "cdsp1", "gdsp0", "gdsp1", "reserved"};
 
 static inline uint32_t fastrpc_check_if_dsp_present_pil(uint32_t domain) {
 	uint32_t domain_supported = 0;
 	struct stat sb;
 	// mark rest of the list as reserved to avoid out of bound access
-	const char *SUBSYSTEM_DEV_NAME[] = {"/dev/subsys_adsp", "", "/dev/subsys_slpi", "/dev/subsys_cdsp", "/dev/subsys_cdsp1", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved"};
+	const char *SUBSYSTEM_DEV_NAME[] = {"/dev/subsys_adsp", "", "/dev/subsys_slpi", "/dev/subsys_cdsp", "/dev/subsys_cdsp1", "/dev/subsys_gdsp0", "/dev/subsys_gdsp1", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved", "reserved"};
 
 	// If device file is present, then target supports that DSP
 	if (!stat(SUBSYSTEM_DEV_NAME[domain], &sb)) {
@@ -44,10 +45,9 @@ static inline uint32_t fastrpc_check_if_dsp_present_rproc(uint32_t domain) {
 	const char *search_string = NULL;
 	uint32_t domain_supported = 0;
 	int dir_index = 0, nErr = AEE_SUCCESS;
-	struct stat dir_stat;
 	char *buffer = NULL;
 
-	if (domain < ADSP_DOMAIN_ID || domain > CDSP_DOMAIN_ID) {
+	if (domain < ADSP_DOMAIN_ID || domain > GDSP1_DOMAIN_ID) {
 		FARF(ERROR, "%s Invalid domain 0x%x ", __func__, domain);
 		return 0;
 	}
@@ -58,16 +58,17 @@ static inline uint32_t fastrpc_check_if_dsp_present_rproc(uint32_t domain) {
 	while (1) {
 		memset(buffer, 0, BUF_SIZE);
 		snprintf(buffer, BUF_SIZE, "%s%d", dir_base_path, dir_index);
-		if (stat(buffer, &dir_stat) == -1) {
+		strlcat(buffer, "/name", BUF_SIZE);
+		int fd = open(buffer, O_RDONLY);
+		if (fd == -1) {
 			break;
 		}
-		std_strlcat(buffer, "/name", BUF_SIZE);
-		FILE *file = fopen(buffer, "r");
+		FILE *file = fdopen(fd, "r");
 		if (file != NULL) {
 			memset(buffer, 0, BUF_SIZE);
 			if (fgets(buffer, BUF_SIZE, file) != NULL) {
 				buffer[BUF_SIZE - 1] = '\0';
-				if (std_strstr(buffer, search_string) != NULL) {
+				if (strstr(buffer, search_string) != NULL) {
 					domain_supported = 1;
 					fclose(file);
 					break;
@@ -75,6 +76,7 @@ static inline uint32_t fastrpc_check_if_dsp_present_rproc(uint32_t domain) {
 			}
 			fclose(file);
 		}
+		close(fd);
 		dir_index++;
 	}
 bail :
@@ -88,9 +90,9 @@ bail :
 }
 
 int fastrpc_get_cap(uint32_t domain, uint32_t attributeID, uint32_t *capability) {
-   int nErr = AEE_SUCCESS, dev = -1, dom = domain & DOMAIN_ID_MASK;
+   int nErr = AEE_SUCCESS, dev = -1, dom = GET_DOMAIN_FROM_EFFEC_DOMAIN_ID(domain);
 
-   VERIFYC(domain >= 0 && domain < NUM_DOMAINS_EXTEND, AEE_EBADPARM);
+   VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADPARM);
    VERIFYC(capability != NULL, AEE_EBADPARM);
    VERIFYC(attributeID < FASTRPC_MAX_ATTRIBUTES, AEE_EBADPARM);   //Check if the attribute ID is less than max attributes accepted by userspace
 
@@ -125,7 +127,7 @@ int fastrpc_get_cap(uint32_t domain, uint32_t attributeID, uint32_t *capability)
 
 bail:
    if(dev != -1)
-        fastrpc_session_close(dev);
+      fastrpc_session_close(dom, dev);
    if (nErr) {
       FARF(ERROR, "Warning 0x%x: %s failed to get attribute %u for domain %u (errno %s)", nErr, __func__, attributeID, domain, strerror(errno));
    }
@@ -147,7 +149,7 @@ static int check_status_notif_version2_capability(int domain)
 {
 	int nErr = 0;
 	struct remote_dsp_capability cap = {0};
-	cap.domain = (domain & DOMAIN_ID_MASK);
+	cap.domain = GET_DOMAIN_FROM_EFFEC_DOMAIN_ID(domain);
 	cap.attribute_ID = STATUS_NOTIFICATION_SUPPORT;
 
 	nErr= fastrpc_get_cap(cap.domain, cap.attribute_ID, &cap.capability);

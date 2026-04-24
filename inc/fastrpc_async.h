@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef FASTRPC_ASYNC_H
 #define FASTRPC_ASYNC_H
@@ -58,7 +58,7 @@ int fastrpc_save_async_job(int domain, struct fastrpc_async_job *asyncjob, fastr
  * returns 0 on success
  *
  */
-int fastrpc_remove_async_job(fastrpc_async_jobid jobid, boolean dsp_invoke_done);
+int fastrpc_remove_async_job(fastrpc_async_jobid jobid, bool dsp_invoke_done);
 
 /*
  * API to initialize async module data strcutures and globals

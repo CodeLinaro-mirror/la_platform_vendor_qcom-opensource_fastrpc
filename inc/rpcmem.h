@@ -1,10 +1,9 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 
 #ifndef RPCMEM_H
 #define RPCMEM_H
 
-#include "AEEStdDef.h"
 #include "stddef.h"
 
 /**
@@ -156,7 +155,7 @@ void rpcmem_deinit(void);
  *    rpcmem_alloc(18, RPCMEM_DEFAULT_FLAGS, 4096);
  * @endcode
  */
-void* rpcmem_alloc(int heapid, uint32 flags, int size);
+void* rpcmem_alloc(int heapid, uint32_t flags, int size);
 
 /**
  * Allocate a zero-copy buffer with the FastRPC framework.
@@ -169,7 +168,7 @@ void* rpcmem_alloc(int heapid, uint32 flags, int size);
  *
  * * The usage examples are same as rpcmem_alloc.
  */
-void* rpcmem_alloc2(int heapid, uint32 flags, size_t size);
+void* rpcmem_alloc2(int heapid, uint32_t flags, size_t size);
 
 /**
  * Allocate a buffer with default settings.

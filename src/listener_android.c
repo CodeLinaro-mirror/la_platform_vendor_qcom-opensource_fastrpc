@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef VERIFY_PRINT_ERROR
 #define VERIFY_PRINT_ERROR
@@ -32,23 +32,24 @@
 #include "rpcmem.h"
 #include "shared.h"
 #include "verify.h"
+#include "fastrpc_hash_table.h"
 
-struct listener {
+typedef struct {
   pthread_t thread;
   int eventfd;
   int update_requested;
   int params_updated;
   sem_t *r_sem;
-  int domain;
   remote_handle64 adsp_listener1_handle;
-};
+  ADD_DOMAIN_HASH();
+} listener_config;
 
-static struct listener linfo[NUM_DOMAINS_EXTEND];
+DECLARE_HASH_TABLE(listener, listener_config);
 
 extern void set_thread_context(int domain);
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_remotectl_open)(const char *name, uint32 *handle, char *dlStr,
+__QAIC_IMPL(apps_remotectl_open)(const char *name, int *handle, char *dlStr,
                                  int dlerrorLen,
                                  int *dlErr) __QAIC_IMPL_ATTRIBUTE {
   int domain = get_current_domain();
@@ -58,13 +59,13 @@ __QAIC_IMPL(apps_remotectl_open)(const char *name, uint32 *handle, char *dlStr,
          (nErr = mod_table_open(name, handle, dlStr, dlerrorLen, dlErr)));
   VERIFY(AEE_SUCCESS ==
          (nErr = fastrpc_update_module_list(
-              REVERSE_HANDLE_LIST_PREPEND, domain, (remote_handle)*handle, &local)));
+              REVERSE_HANDLE_LIST_PREPEND, domain, (remote_handle)*handle, &local, NULL)));
 bail:
   return nErr;
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_remotectl_close)(uint32 handle, char *errStr, int errStrLen,
+__QAIC_IMPL(apps_remotectl_close)(int handle, char *errStr, int errStrLen,
                                   int *dlErr) __QAIC_IMPL_ATTRIBUTE {
   int domain = get_current_domain();
   int nErr = AEE_SUCCESS;
@@ -80,7 +81,7 @@ __QAIC_IMPL(apps_remotectl_close)(uint32 handle, char *errStr, int errStrLen,
   }
   VERIFY(AEE_SUCCESS ==
          (nErr = fastrpc_update_module_list(
-              REVERSE_HANDLE_LIST_DEQUEUE, domain, (remote_handle)handle, NULL)));
+              REVERSE_HANDLE_LIST_DEQUEUE, domain, (remote_handle)handle, NULL, NULL)));
 bail:
   return nErr;
 }
@@ -93,7 +94,7 @@ bail:
     }                                                                          \
   } while (0)
 
-static __inline void *rpcmem_realloc(int heapid, uint32 flags, void *buf,
+static __inline void *rpcmem_realloc(int heapid, uint32_t flags, void *buf,
                                      int oldsize, size_t size) {
   void *bufnew = rpcmem_alloc_internal(heapid, flags, size);
   if (buf && bufnew) {
@@ -107,20 +108,20 @@ static __inline void *rpcmem_realloc(int heapid, uint32 flags, void *buf,
 #define MIN_BUF_SIZE 0x1000
 #define ALIGNB(sz) ((sz) == 0 ? MIN_BUF_SIZE : _SBUF_ALIGN((sz), MIN_BUF_SIZE))
 
-static void listener(struct listener *me) {
+static void listener(listener_config *me) {
   int nErr = AEE_SUCCESS, i = 0, domain = me->domain, ref = 0;
   adsp_listener1_invoke_ctx ctx = 0;
-  uint8 *outBufs = 0;
+  uint8_t *outBufs = 0;
   int outBufsLen = 0, outBufsCapacity = 0;
-  uint8 *inBufs = 0;
+  uint8_t *inBufs = 0;
   int inBufsLen = 0, inBufsLenReq = 0;
   int result = -1, bufs_len = 0;
   adsp_listener1_remote_handle handle = -1;
-  uint32 sc = 0;
+  uint32_t sc = 0;
   const char *eheap = getenv("ADSP_LISTENER_HEAP_ID");
   int heapid = eheap == 0 ? -1 : atoi(eheap);
   const char *eflags = getenv("ADSP_LISTENER_HEAP_FLAGS");
-  uint32 flags = eflags == 0 ? 0 : (uint32)atoi(eflags);
+  uint32_t flags = eflags == 0 ? 0 : (uint32_t)atoi(eflags);
   const char *emin = getenv("ADSP_LISTENER_MEM_CACHE_SIZE");
   int cache_size = emin == 0 ? 0 : atoi(emin);
   remote_arg args[512];
@@ -156,8 +157,18 @@ static void listener(struct listener *me) {
     }
     if (nErr) {
       if (nErr == AEE_EINTERRUPTED) {
+        /* UserPD in CPZ migration. Keep retrying until migration is complete.
+         * Also reset the context, as previous context is invalid after CPZ
+         * migration
+        */
+        ctx = 0;
+        result = -1;
         goto invoke;
+      } else if (nErr == (DSP_AEE_EOFFSET + AEE_EBADSTATE)) {
+          /* UserPD in irrecoverable bad state. Exit listener */
+          goto bail;
       }
+      /* For any other error, retry once and exit if error seen again */
       if (me->adsp_listener1_handle != INVALID_HANDLE) {
         nErr = __QAIC_HEADER(adsp_listener1_next2)(
             me->adsp_listener1_handle, ctx, nErr, 0, 0, &ctx, &handle, &sc,
@@ -226,7 +237,7 @@ static void listener(struct listener *me) {
         result = AEE_EBADPARM;
         FARF(RUNTIME_RPC_HIGH,
              "adsp_listener_invoke_get_in_bufs2 failed, size is invalid req %d "
-             "inBufsLen %d result %d %x",
+             "inBufsLen %d result %d",
              req, inBufsLen, result);
         goto invoke;
       }
@@ -310,12 +321,13 @@ bail:
         "Error 0x%x : Writing to listener event_fd %d failed (errno %s)", nErr,
         me->eventfd, strerror(errno));
   }
+  FARF(ALWAYS, "%s thread exiting\n", __func__);
   dlerror();
 }
 
-extern int apps_remotectl_skel_invoke(uint32 _sc, remote_arg *_pra);
-extern int apps_std_skel_invoke(uint32 _sc, remote_arg *_pra);
-extern int apps_mem_skel_invoke(uint32 _sc, remote_arg *_pra);
+extern int apps_remotectl_skel_invoke(uint32_t _sc, remote_arg *_pra);
+extern int apps_std_skel_invoke(uint32_t _sc, remote_arg *_pra);
+extern int apps_mem_skel_invoke(uint32_t _sc, remote_arg *_pra);
 extern int adspmsgd_apps_skel_invoke(uint32_t _sc, remote_arg *_pra);
 extern int fastrpc_set_remote_uthread_params(int domain);
 
@@ -324,7 +336,7 @@ PL_DEP(apps_std);
 
 static void *listener_start_thread(void *arg) {
   int nErr = AEE_SUCCESS;
-  struct listener *me = (struct listener *)arg;
+  listener_config *me = (listener_config *)arg;
   int domain = me->domain;
   remote_handle64 adsp_listener1_handle = INVALID_HANDLE;
 
@@ -333,15 +345,20 @@ static void *listener_start_thread(void *arg) {
    * Otherwise, the init2() call will go to default domain.
    */
   set_thread_context(domain);
-  adsp_listener1_handle = get_adsp_listener1_handle(domain);
-  nErr = __QAIC_HEADER(adsp_listener1_init2)(adsp_listener1_handle);
-  if (nErr) {
-    FARF(ERROR, "Error 0x%x: %s domains support not available in listener",
-         nErr, __func__);
-    fastrpc_update_module_list(DOMAIN_LIST_DEQUEUE, domain, adsp_listener1_handle, NULL);
-    VERIFY(AEE_SUCCESS == (nErr = __QAIC_HEADER(adsp_listener_init2)()));
+  if ((adsp_listener1_handle = get_adsp_listener1_handle(domain)) != INVALID_HANDLE) {
+    nErr = __QAIC_HEADER(adsp_listener1_init2)(adsp_listener1_handle);
+    if ((nErr == DSP_AEE_EOFFSET + AEE_ERPC) ||
+        nErr == DSP_AEE_EOFFSET + AEE_ENOSUCHMOD) {
+      FARF(ERROR, "Error 0x%x: %s domains support not available in listener",
+           nErr, __func__);
+      fastrpc_update_module_list(DOMAIN_LIST_DEQUEUE, domain, _const_adsp_listener1_handle, NULL, NULL);
+      adsp_listener1_handle = INVALID_HANDLE;
+      VERIFY(AEE_SUCCESS == (nErr = __QAIC_HEADER(adsp_listener_init2)()));
+    } else if (nErr == AEE_SUCCESS) {
+      me->adsp_listener1_handle = adsp_listener1_handle;
+    }
   } else {
-    me->adsp_listener1_handle = adsp_listener1_handle;
+    VERIFY(AEE_SUCCESS == (nErr = __QAIC_HEADER(adsp_listener_init2)()));
   }
 
   if (me->update_requested) {
@@ -362,17 +379,15 @@ bail:
 }
 
 void listener_android_deinit(void) {
+  HASH_TABLE_CLEANUP(listener_config);
   PL_DEINIT(mod_table);
   PL_DEINIT(apps_std);
 }
 
 int listener_android_init(void) {
   int nErr = 0;
-  int i;
 
-  // initializing all event fd's
-  for (i = 0; i < NUM_DOMAINS_EXTEND; i++)
-    linfo[i].eventfd = -1;
+  HASH_TABLE_INIT(listener_config);
 
   VERIFY(AEE_SUCCESS == (nErr = PL_INIT(mod_table)));
   VERIFY(AEE_SUCCESS == (nErr = PL_INIT(apps_std)));
@@ -393,7 +408,11 @@ bail:
 }
 
 void listener_android_domain_deinit(int domain) {
-  struct listener *me = &linfo[domain];
+  listener_config *me = NULL;
+
+  GET_HASH_NODE(listener_config, domain, me);
+  if (!me)
+    return;
 
   FARF(RUNTIME_RPC_HIGH, "fastrpc listener joining to exit");
   if (me->thread) {
@@ -412,9 +431,14 @@ void listener_android_domain_deinit(int domain) {
 
 int listener_android_domain_init(int domain, int update_requested,
                                  sem_t *r_sem) {
-  struct listener *me = &linfo[domain];
+  listener_config *me = NULL;
   int nErr = AEE_SUCCESS;
 
+  GET_HASH_NODE(listener_config, domain, me);
+  if (!me) {
+    ALLOC_AND_ADD_NEW_NODE_TO_TABLE(listener_config, domain, me);
+  }
+  me->eventfd = -1;
   VERIFYC(-1 != (me->eventfd = eventfd(0, 0)), AEE_EBADPARM);
   FARF(RUNTIME_RPC_HIGH, "Opened Listener event_fd %d for domain %d\n",
        me->eventfd, domain);
@@ -436,7 +460,6 @@ int listener_android_domain_init(int domain, int update_requested,
     sem_wait(me->r_sem);
     VERIFY(AEE_SUCCESS == (nErr = me->params_updated));
   }
-
 bail:
   if (nErr != AEE_SUCCESS) {
     VERIFY_EPRINTF("Error 0x%x: %s failed for domain %d\n", nErr, __func__,
@@ -448,13 +471,15 @@ bail:
 
 int close_reverse_handle(remote_handle64 h, char *dlerr, int dlerrorLen,
                          int *dlErr) {
-  return apps_remotectl_close((uint32)h, dlerr, dlerrorLen, dlErr);
+  return apps_remotectl_close((int)h, dlerr, dlerrorLen, dlErr);
 }
 
 int listener_android_geteventfd(int domain, int *fd) {
-  struct listener *me = &linfo[domain];
+  listener_config *me = NULL;
   int nErr = 0;
 
+  GET_HASH_NODE(listener_config, domain, me);
+  VERIFYC(me, AEE_ERESOURCENOTFOUND);
   VERIFYC(-1 != me->eventfd, AEE_EBADPARM);
   *fd = me->eventfd;
 bail:

@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef _ADSP_PERF_H
 #define _ADSP_PERF_H
@@ -77,7 +77,7 @@ extern "C" {
  */
 #define _const_adsp_perf_handle 6
 __QAIC_HEADER_EXPORT int __QAIC_HEADER(adsp_perf_enable)(int ix) __QAIC_HEADER_ATTRIBUTE;
-__QAIC_HEADER_EXPORT int __QAIC_HEADER(adsp_perf_get_usecs)(int64* dst, int dstLen) __QAIC_HEADER_ATTRIBUTE;
+__QAIC_HEADER_EXPORT int __QAIC_HEADER(adsp_perf_get_usecs)(int64_t* dst, int dstLen) __QAIC_HEADER_ATTRIBUTE;
 __QAIC_HEADER_EXPORT int __QAIC_HEADER(adsp_perf_get_keys)(char* keys, int keysLen, int* maxLen, int* numKeys) __QAIC_HEADER_ATTRIBUTE;
 #ifdef __cplusplus
 }

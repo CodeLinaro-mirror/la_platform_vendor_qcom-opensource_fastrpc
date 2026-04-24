@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef FASTRPC_ANDROID_USER_H
 #define FASTRPC_ANDROID_USER_H
@@ -20,13 +20,22 @@
 #define __CONSTRUCTOR_ATTRIBUTE__ __attribute__((constructor))
 #endif
 
-/*
- * API to check if kernel supports remote memory allocation
- * Returns 0 if NOT supported
- *
- */
-int is_kernel_alloc_supported(int dev, int domain);
+/* Verify if the handle is configured for staticPD. */
+#define IS_STATICPD_HANDLE(h) ((h > 0xff) && (h <= 0x200))
 
+/*
+ * Enum defined for static PD handles.
+ * The range for constant handles is <0,255>,
+ * and the range for staticPD handles is <256,512>
+ */
+typedef enum {
+	 OISPD_HANDLE			=	256,
+	 AUDIOPD_HANDLE			=	257,
+	 SENSORPD_HANDLE		=	258,
+	 ATTACHGUESTOS_HANDLE		=	259,
+	 ROOTPD_HANDLE			=	260,
+	 SECUREPD_HANDLE		=	261
+ } static_pd_handle;
 /*
  * API to initialize rpcmem data structures for ION allocation
  */
@@ -42,7 +51,7 @@ void rpcmem_deinit_internal();
  * Returns NULL if allocation fails
  *
  */
-void* rpcmem_alloc_internal(int heapid, uint32 flags, size_t size);
+void* rpcmem_alloc_internal(int heapid, uint32_t flags, size_t size);
 
 /*
  * API to free internally allocated ION memory
@@ -116,7 +125,7 @@ int close_reverse_handle(remote_handle64 handle, char* errStr, int errStrLen, in
  * @unsigned_module: PD Attribute for unsigned module
  * @returns: 0 on success, valid non-zero error code on failure
  */
-int get_unsigned_pd_attribute(uint32 domain, int *unsigned_module);
+int get_unsigned_pd_attribute(uint32_t domain, int *unsigned_module);
 
 /*
  * Check whether userspace memory allocation is supported or not.

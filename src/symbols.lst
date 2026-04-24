@@ -1,5 +1,6 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear 
+ */
 
 {
    global:
@@ -31,7 +32,6 @@
       rpcmem_init;
       rpcmem_deinit;
       rpcmem_alloc;
-      rpcmem_alloc2;
       rpcmem_free;
       rpcmem_to_fd;
       remote_handle_invoke_async;
@@ -41,6 +41,7 @@
       dspqueue_create;
       dspqueue_close;
       dspqueue_export;
+      dspqueue_request;
       dspqueue_write_noblock;
       dspqueue_write;
       dspqueue_read_noblock;
@@ -51,5 +52,6 @@
       dspqueue_get_stat;
       HAP_debug_v2;
       HAP_debug_runtime;
+      get_domain_from_name;
    local: *;
 };

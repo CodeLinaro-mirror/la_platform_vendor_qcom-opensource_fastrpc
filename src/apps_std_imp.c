@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifdef _WIN32
 #ifndef _CRT_SECURE_NO_WARNINGS
@@ -28,18 +28,18 @@
 
 #include "AEEQList.h"
 #include "AEEStdErr.h"
-#include "AEEatomic.h"
 #include "AEEstd.h"
 #include "HAP_farf.h"
 #include "apps_std.h"
 #include "apps_std_internal.h"
-#include "fastrpc_common.h"
+#include "fastrpc_internal.h"
 #include "fastrpc_trace.h"
 #include "platform_libs.h"
 #include "remote.h"
 #include "rpcmem_internal.h"
 #include "verify.h"
 #include <dirent.h>
+#include <limits.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -104,7 +104,7 @@ struct apps_std_info {
  */
 struct apps_std_dir_info {
   QNode qn;
-  uint64 handle;
+  uint64_t handle;
 };
 
 static QList apps_std_qlst;
@@ -137,13 +137,13 @@ int apps_std_get_dirinfo(const apps_std_DIR *dir,
   int nErr = AEE_SUCCESS;
   QNode *pn = NULL, *pnn = NULL;
   struct apps_std_dir_info *dirinfo = 0;
-  boolean match = FALSE;
+  bool match = false;
 
   pthread_mutex_lock(&apps_std_mt);
   QLIST_NEXTSAFE_FOR_ALL(&apps_std_dirlist, pn, pnn) {
     dirinfo = STD_RECOVER_REC(struct apps_std_dir_info, qn, pn);
     if (dirinfo && dirinfo->handle == dir->handle) {
-      match = TRUE;
+      match = true;
       break;
     }
   }
@@ -283,11 +283,11 @@ __QAIC_IMPL(apps_std_fopen)(const char *name, const char *mode,
   FARF(RUNTIME_RPC_LOW, "Entering %s", __func__);
   errno = 0;
   VERIFYC(name != NULL, AEE_EBADPARM);
-  PROFILE(&tdiff, stream = fopen(name, mode););
+  PROFILE_ALWAYS(&tdiff, stream = fopen(name, mode););
   if (stream) {
     FASTRPC_ATRACE_END_L("%s done, fopen for %s in mode %s done in %" PRIu64
-                         " us",
-                         __func__, name, mode, tdiff);
+                         " us, fd 0x%x error_code 0x%x",
+                         __func__, name, mode, tdiff, *psout, nErr);
     return apps_std_FILE_alloc(stream, psout);
   } else {
     nErr = ERRNO;
@@ -314,7 +314,7 @@ __QAIC_IMPL(apps_std_fopen_fd)(const char *name, const char *mode, int *fd,
   struct mem_io_to_fd *tofd = 0;
   int domain = get_current_domain();
   FILE *stream = NULL;
-  boolean fopen_fail = FALSE, mmap_pass = FALSE;
+  bool fopen_fail = false, mmap_pass = false;
   uint64_t fopen_time = 0, read_time = 0, rpc_alloc_time = 0, mmap_time = 0;
 
   FASTRPC_ATRACE_BEGIN_L("%s for %s in %s mode", __func__, name, mode);
@@ -323,7 +323,7 @@ __QAIC_IMPL(apps_std_fopen_fd)(const char *name, const char *mode, int *fd,
   VERIFYC(name != NULL, AEE_EBADPARM);
   PROFILE_ALWAYS(&fopen_time, stream = fopen(name, mode););
   if (!stream) {
-    fopen_fail = TRUE;
+    fopen_fail = true;
     nErr = ERRNO;
     goto bail;
   }
@@ -378,10 +378,10 @@ bail:
                        "us, rpc_alloc:%" PRIu64 "us, mmap:%" PRIu64 "us",
                        __func__, name, fopen_time, read_time, rpc_alloc_time,
                        mmap_time);
-  FARF(CRITICAL,
+  FARF(RUNTIME_RPC_CRITICAL,
        "%s: done for %s with fopen:%" PRIu64 "us, read:%" PRIu64
-       "us, rpc_alloc:%" PRIu64 "us, mmap:%" PRIu64 "us",
-       __func__, name, fopen_time, read_time, rpc_alloc_time, mmap_time);
+       "us, rpc_alloc:%" PRIu64 "us, mmap:%" PRIu64 "us, fd 0x%x error_code 0x%x",
+       __func__, name, fopen_time, read_time, rpc_alloc_time, mmap_time, *fd, nErr);
   return nErr;
 }
 __QAIC_IMPL_EXPORT int
@@ -445,13 +445,17 @@ __QAIC_IMPL_EXPORT int
 __QAIC_IMPL(apps_std_fclose)(apps_std_FILE sin) __QAIC_IMPL_ATTRIBUTE {
   int nErr = AEE_SUCCESS;
   struct apps_std_info *sinfo = 0;
+  uint64_t tdiff = 0;
 
   FASTRPC_ATRACE_BEGIN_L("%s for file with fd 0x%x", __func__, sin);
   FARF(RUNTIME_RPC_LOW, "Entering %s", __func__);
   errno = 0;
   VERIFY(0 == (nErr = apps_std_FILE_get(sin, &sinfo)));
   if (sinfo->type == APPS_STD_STREAM_FILE) {
-    VERIFYC(0 == fclose(sinfo->u.stream), ERRNO);
+      PROFILE_ALWAYS(&tdiff,
+      nErr = fclose(sinfo->u.stream);
+      );
+      VERIFYC(nErr == AEE_SUCCESS, ERRNO);
   } else {
     if (sinfo->u.binfo.fbuf) {
       rpcmem_free_internal(sinfo->u.binfo.fbuf);
@@ -465,7 +469,8 @@ bail:
                    strerror(nErr));
   }
   FARF(RUNTIME_RPC_LOW, "Exiting %s sin %x err %d", __func__, sin, nErr);
-  FASTRPC_ATRACE_END();
+  FASTRPC_ATRACE_END_L("%s fd 0x%x in %"PRIu64" us error_code 0x%x ",
+      __func__, sin, tdiff, nErr);
   return nErr;
 }
 
@@ -473,6 +478,7 @@ __QAIC_IMPL_EXPORT int
 __QAIC_IMPL(apps_std_fclose_fd)(int fd) __QAIC_IMPL_ATTRIBUTE {
   int nErr = AEE_SUCCESS;
   int domain = get_current_domain();
+  uint64_t tdiff = 0;
 
   FASTRPC_ATRACE_BEGIN_L("%s for file with fd 0x%x", __func__, fd);
   FARF(RUNTIME_RPC_LOW, "Entering %s", __func__);
@@ -497,7 +503,10 @@ __QAIC_IMPL(apps_std_fclose_fd)(int fd) __QAIC_IMPL_ATTRIBUTE {
       rpcmem_free_internal(freefd->buf);
       freefd->buf = NULL;
     }
-    VERIFYC(0 == fclose(freefd->stream), ERRNO);
+    PROFILE_ALWAYS(&tdiff,
+    nErr = fclose(freefd->stream);
+    );
+    VERIFYC(nErr == AEE_SUCCESS, ERRNO);
   }
 bail:
   FREEIF(freefd);
@@ -506,11 +515,12 @@ bail:
                    fd, strerror(nErr));
   }
   FARF(RUNTIME_RPC_LOW, "Exiting %s fd %x err %d", __func__, fd, nErr);
-  FASTRPC_ATRACE_END();
+  FASTRPC_ATRACE_END_L("%s fd 0x%x in %"PRIu64" us error_code 0x%x",
+   __func__, fd, tdiff, nErr);
   return nErr;
 }
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_std_fread)(apps_std_FILE sin, byte *buf, int bufLen,
+__QAIC_IMPL(apps_std_fread)(apps_std_FILE sin, unsigned char *buf, int bufLen,
                             int *bytesRead, int *bEOF) __QAIC_IMPL_ATTRIBUTE {
   int out = 0, nErr = AEE_SUCCESS;
   struct apps_std_info *sinfo = 0;
@@ -522,15 +532,15 @@ __QAIC_IMPL(apps_std_fread)(apps_std_FILE sin, byte *buf, int bufLen,
   errno = 0;
   VERIFY(0 == (nErr = apps_std_FILE_get(sin, &sinfo)));
   if (sinfo->type == APPS_STD_STREAM_FILE) {
-    PROFILE(&tdiff, out = fread(buf, 1, bufLen, sinfo->u.stream););
-    *bEOF = FALSE;
+    PROFILE_ALWAYS(&tdiff, out = fread(buf, 1, bufLen, sinfo->u.stream););
+    *bEOF = false;
     if (out <= bufLen) {
       int err;
       if (0 == out && (0 != (err = ferror(sinfo->u.stream)))) {
         nErr = ERRNO;
-        VERIFY_EPRINTF("Error 0x%x: fread returning %d bytes, requested was %d "
+        VERIFY_EPRINTF("Error 0x%x: fread returning %d bytes in %"PRIu64" us, requested was %d "
                        "bytes, errno is %x\n",
-                       nErr, out, bufLen, err);
+                       nErr, out, tdiff, bufLen, err);
         return nErr;
       }
       *bEOF = feof(sinfo->u.stream);
@@ -538,25 +548,25 @@ __QAIC_IMPL(apps_std_fread)(apps_std_FILE sin, byte *buf, int bufLen,
     }
     *bytesRead = out;
   } else {
-    *bytesRead =
-        std_memscpy(buf, bufLen, sinfo->u.binfo.fbuf + sinfo->u.binfo.pos,
+    unsigned int read = STD_MIN(bufLen,
                     sinfo->u.binfo.flen - sinfo->u.binfo.pos);
-    sinfo->u.binfo.pos += *bytesRead;
-    *bEOF = sinfo->u.binfo.pos == sinfo->u.binfo.flen ? TRUE : FALSE;
+    memcpy(buf, sinfo->u.binfo.fbuf + sinfo->u.binfo.pos, read);
+    *bytesRead = read;
+    sinfo->u.binfo.pos += read;
+    *bEOF = sinfo->u.binfo.pos == sinfo->u.binfo.flen ? true : false;
   }
   FARF(RUNTIME_RPC_HIGH, "fread returning %d %d\n", out, bufLen);
 bail:
   FARF(RUNTIME_RPC_LOW,
        "Exiting %s returning %d bytes, requested was %d bytes for %x, err 0x%x",
        __func__, out, bufLen, sin, nErr);
-  FASTRPC_ATRACE_END_L("%s done, read %d bytes in %" PRIu64
-                       " us, requested %d bytes for fd 0x%x, err 0x%x",
-                       __func__, out, tdiff, bufLen, sin, nErr);
+  FASTRPC_ATRACE_END_L("%s done, read %d bytes in %"PRIu64" us requested %d bytes,"
+      "fd 0x%x", __func__, out, tdiff, bufLen, sin);
   return nErr;
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_std_fwrite)(apps_std_FILE sin, const byte *buf, int bufLen,
+__QAIC_IMPL(apps_std_fwrite)(apps_std_FILE sin, const unsigned char *buf, int bufLen,
                              int *bytesRead, int *bEOF) __QAIC_IMPL_ATTRIBUTE {
   int out = 0, nErr = AEE_SUCCESS;
   struct apps_std_info *sinfo = 0;
@@ -568,7 +578,7 @@ __QAIC_IMPL(apps_std_fwrite)(apps_std_FILE sin, const byte *buf, int bufLen,
   VERIFY(0 == (nErr = apps_std_FILE_get(sin, &sinfo)));
   if (sinfo->type == APPS_STD_STREAM_FILE) {
     out = fwrite(buf, 1, bufLen, sinfo->u.stream);
-    *bEOF = FALSE;
+    *bEOF = false;
     if (out <= bufLen) {
       int err;
       if (0 == out && (0 != (err = ferror(sinfo->u.stream)))) {
@@ -594,7 +604,7 @@ bail:
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_std_fgetpos)(apps_std_FILE sin, byte *pos, int posLen,
+__QAIC_IMPL(apps_std_fgetpos)(apps_std_FILE sin, unsigned char *pos, int posLen,
                               int *posLenReq) __QAIC_IMPL_ATTRIBUTE {
   int nErr = AEE_SUCCESS;
   fpos_t fpos;
@@ -607,7 +617,7 @@ __QAIC_IMPL(apps_std_fgetpos)(apps_std_FILE sin, byte *pos, int posLen,
   VERIFY(0 == (nErr = apps_std_FILE_get(sin, &sinfo)));
   if (sinfo->type == APPS_STD_STREAM_FILE) {
     if (0 == fgetpos(sinfo->u.stream, &fpos)) {
-      std_memmove(pos, &fpos, STD_MIN((int)sizeof(fpos), posLen));
+      memmove(pos, &fpos, STD_MIN((int)sizeof(fpos), posLen));
       *posLenReq = sizeof(fpos);
     } else {
       nErr = ERRNO;
@@ -626,7 +636,7 @@ bail:
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_std_fsetpos)(apps_std_FILE sin, const byte *pos,
+__QAIC_IMPL(apps_std_fsetpos)(apps_std_FILE sin, const unsigned char *pos,
                               int posLen) __QAIC_IMPL_ATTRIBUTE {
   int nErr = AEE_SUCCESS;
   fpos_t fpos;
@@ -642,7 +652,7 @@ __QAIC_IMPL(apps_std_fsetpos)(apps_std_FILE sin, const byte *pos,
       nErr = EBADF;
       goto bail;
     }
-    std_memmove(&fpos, pos, sizeof(fpos));
+    memmove(&fpos, pos, sizeof(fpos));
     VERIFYC(0 == fsetpos(sinfo->u.stream, &fpos), ERRNO);
   } else {
     nErr = EBADF;
@@ -711,7 +721,7 @@ __QAIC_IMPL(apps_std_fseek)(apps_std_FILE sin, int offset,
       sinfo->u.binfo.pos += offset;
       break;
     case APPS_STD_SEEK_END:
-      VERIFYC(offset + sinfo->u.binfo.flen <= sinfo->u.binfo.flen, AEE_EFILE);
+      VERIFYC(offset <= INT_MAX - sinfo->u.binfo.flen, AEE_EFILE);
       sinfo->u.binfo.pos += offset + sinfo->u.binfo.flen;
       break;
     }
@@ -822,7 +832,7 @@ bail:
 
 __QAIC_IMPL_EXPORT int
 __QAIC_IMPL(apps_std_flen)(apps_std_FILE sin,
-                           uint64 *len) __QAIC_IMPL_ATTRIBUTE {
+                           uint64_t *len) __QAIC_IMPL_ATTRIBUTE {
   int nErr = AEE_SUCCESS;
   struct apps_std_info *sinfo = 0;
 
@@ -868,8 +878,8 @@ __QAIC_IMPL(apps_std_getenv)(const char *name, char *val, int valLen,
   errno = 0;
   char *vv = getenv(name);
   if (vv) {
-    *valLenReq = std_strlen(vv) + 1;
-    std_strlcpy(val, vv, STD_MIN(valLen, *valLenReq));
+    *valLenReq = strlen(vv) + 1;
+    strlcpy(val, vv, STD_MIN(valLen, *valLenReq));
     return AEE_SUCCESS;
   }
   nErr = ERRNO;
@@ -922,11 +932,15 @@ static int get_dirlist_from_env(const char *envvarname, char **ppDirList) {
   char *dirList = NULL;
   char *dirListBuf = NULL;
   char *srcStr = NULL;
+  const char *dsp_search_path = NULL;
   int nErr = AEE_SUCCESS;
   int envListLen = 0;
   int envListPrependLen = 0;
   int listLen = 0;
-  int envLenGuess = STD_MAX(ENV_LEN_GUESS, 1 + std_strlen(DSP_SEARCH_PATH));
+  int envLenGuess = 0;
+  
+  dsp_search_path = get_dsp_search_path();
+  envLenGuess = STD_MAX(ENV_LEN_GUESS, 1 + strlen(dsp_search_path));
 
   FARF(RUNTIME_RPC_LOW, "Entering %s", __func__);
   VERIFYC(NULL != ppDirList, AEE_ERPC);
@@ -936,12 +950,12 @@ static int get_dirlist_from_env(const char *envvarname, char **ppDirList) {
   envList = envListBuf;
   *envList = '\0';
   if (0 == apps_std_getenv(envvarname, envList, envLenGuess, &envListLen)) {
-    if (std_strncmp(envvarname, ADSP_LIBRARY_PATH,
-                    std_strlen(ADSP_LIBRARY_PATH)) == 0 ||
-        std_strncmp(envvarname, DSP_LIBRARY_PATH,
-                    std_strlen(DSP_LIBRARY_PATH)) == 0) {
-      // Calculate total length of env and DSP_SEARCH_PATH
-      envListPrependLen = envListLen + std_strlen(DSP_SEARCH_PATH);
+    if (strncmp(envvarname, ADSP_LIBRARY_PATH,
+                    strlen(ADSP_LIBRARY_PATH)) == 0 ||
+        strncmp(envvarname, DSP_LIBRARY_PATH,
+                    strlen(DSP_LIBRARY_PATH)) == 0) {
+      // Calculate total length of env + semicolon + DSP_SEARCH_PATH
+      envListPrependLen = envListLen + 1 + strlen(dsp_search_path);
       if (envLenGuess < envListPrependLen) {
         FREEIF(envListBuf);
         VERIFYC(envListBuf =
@@ -951,12 +965,14 @@ static int get_dirlist_from_env(const char *envvarname, char **ppDirList) {
         VERIFY(0 == (nErr = apps_std_getenv(envvarname, envList,
                                             envListPrependLen, &listLen)));
       }
+      // Append semicolon before DSP_SEARCH_PATH
+      strlcat(envList, ";", envListPrependLen);
       // Append default DSP_SEARCH_PATH to user defined env
-      std_strlcat(envList, DSP_SEARCH_PATH, envListPrependLen);
+      strlcat(envList, dsp_search_path, envListPrependLen);
       envListLen = envListPrependLen;
-    } else if (std_strncmp(envvarname, ADSP_AVS_PATH,
-                           std_strlen(ADSP_AVS_PATH)) == 0) {
-      envListPrependLen = envListLen + std_strlen(ADSP_AVS_CFG_PATH);
+    } else if (strncmp(envvarname, ADSP_AVS_PATH,
+                           strlen(ADSP_AVS_PATH)) == 0) {
+      envListPrependLen = envListLen + strlen(ADSP_AVS_CFG_PATH);
       if (envLenGuess < envListPrependLen) {
         FREEIF(envListBuf);
         VERIFYC(envListBuf =
@@ -966,21 +982,19 @@ static int get_dirlist_from_env(const char *envvarname, char **ppDirList) {
         VERIFY(0 == (nErr = apps_std_getenv(envvarname, envList,
                                             envListPrependLen, &listLen)));
       }
-      std_strlcat(envList, ADSP_AVS_CFG_PATH, envListPrependLen);
+      strlcat(envList, ADSP_AVS_CFG_PATH, envListPrependLen);
       envListLen = envListPrependLen;
-    } else {
-      envListLen = listLen;
     }
-  } else if (std_strncmp(envvarname, ADSP_LIBRARY_PATH,
-                         std_strlen(ADSP_LIBRARY_PATH)) == 0 ||
-             std_strncmp(envvarname, DSP_LIBRARY_PATH,
-                         std_strlen(DSP_LIBRARY_PATH)) == 0) {
+  } else if (strncmp(envvarname, ADSP_LIBRARY_PATH,
+                         strlen(ADSP_LIBRARY_PATH)) == 0 ||
+             strncmp(envvarname, DSP_LIBRARY_PATH,
+                         strlen(DSP_LIBRARY_PATH)) == 0) {
     envListLen = listLen =
-        1 + std_strlcpy(envListBuf, DSP_SEARCH_PATH, envLenGuess);
-  } else if (std_strncmp(envvarname, ADSP_AVS_PATH,
-                         std_strlen(ADSP_AVS_PATH)) == 0) {
+        1 + strlcpy(envListBuf, dsp_search_path, envLenGuess);
+  } else if (strncmp(envvarname, ADSP_AVS_PATH,
+                         strlen(ADSP_AVS_PATH)) == 0) {
     envListLen = listLen =
-        1 + std_strlcpy(envListBuf, ADSP_AVS_CFG_PATH, envLenGuess);
+        1 + strlcpy(envListBuf, ADSP_AVS_CFG_PATH, envLenGuess);
   }
 
   /*
@@ -989,13 +1003,13 @@ static int get_dirlist_from_env(const char *envvarname, char **ppDirList) {
   if ('\0' != *envList) {
     srcStr = envList;
   } else {
-    envListLen = std_strlen(EMTPY_STR) + 1;
+    envListLen = strlen(EMTPY_STR) + 1;
   }
   VERIFYC(dirListBuf = (char *)malloc(sizeof(char) * envListLen),
           AEE_ENOMEMORY);
   dirList = dirListBuf;
   VERIFYC(srcStr != NULL, AEE_EBADPARM);
-  std_strlcpy(dirList, srcStr, envListLen);
+  strlcpy(dirList, srcStr, envListLen);
   *ppDirList = dirListBuf;
 bail:
   FREEIF(envListBuf);
@@ -1008,21 +1022,89 @@ bail:
   return nErr;
 }
 
+int fopen_from_dirlist(const char *dirList, const char *delim, 
+    const char *mode, const char *name, apps_std_FILE *psout) {
+  int nErr = AEE_SUCCESS;
+  char *absName = NULL, *dirName = NULL, *pos = NULL;
+  uint16_t absNameLen = 0;
+  int domain = GET_DOMAIN_FROM_EFFEC_DOMAIN_ID(get_current_domain());
+
+  VERIFYC(NULL != dirList, AEE_EBADPARM);
+
+  while (dirList) {
+    pos = strstr(dirList, delim);
+    dirName = dirList;
+    if (pos) {
+      *pos = '\0';
+      dirList = pos + strlen(delim);
+    } else {
+      dirList = 0;
+    }
+
+    // Append domain to path
+    absNameLen =
+        strlen(dirName) + strlen(name) + 2 + strlen(SUBSYSTEM_NAME[domain]) + 1;
+    VERIFYC(NULL != (absName = (char *)malloc(sizeof(char) * absNameLen)),
+            AEE_ENOMEMORY);
+    if ('\0' != *dirName) {
+      strlcpy(absName, dirName, absNameLen);
+      strlcat(absName, "/", absNameLen);
+      strlcat(absName, SUBSYSTEM_NAME[domain], absNameLen);
+      strlcat(absName, "/", absNameLen);
+      strlcat(absName, name, absNameLen);
+    } else {
+      strlcpy(absName, name, absNameLen);
+    }
+
+    nErr = apps_std_fopen(absName, mode, psout);
+    if (AEE_SUCCESS == nErr) {
+      // Success
+      FARF(ALWAYS, "Successfully opened file %s", absName);
+      FREEIF(absName);
+      return nErr;
+    }
+    FREEIF(absName);
+
+    // fallback: If not found in domain path /vendor/dsp/adsp try in /vendor/dsp
+    absNameLen = strlen(dirName) + strlen(name) + 2;
+    VERIFYC(NULL != (absName = (char *)malloc(sizeof(char) * absNameLen)),
+            AEE_ENOMEMORY);
+    if ('\0' != *dirName) {
+      strlcpy(absName, dirName, absNameLen);
+      strlcat(absName, "/", absNameLen);
+      strlcat(absName, name, absNameLen);
+    } else {
+      strlcpy(absName, name, absNameLen);
+    }
+
+    nErr = apps_std_fopen(absName, mode, psout);
+    if (AEE_SUCCESS == nErr) {
+      // Success
+      if (name != NULL &&
+          (strncmp(name, OEM_CONFIG_FILE_NAME,
+                       strlen(OEM_CONFIG_FILE_NAME)) != 0) &&
+          (strncmp(name, TESTSIG_FILE_NAME,
+                       strlen(TESTSIG_FILE_NAME)) != 0))
+        FARF(ALWAYS, "Successfully opened file %s", name);
+      FREEIF(absName);
+      return nErr;
+    }
+  }
+bail:
+  FREEIF(absName);
+  return nErr;
+}
+
 __QAIC_IMPL_EXPORT int __QAIC_IMPL(apps_std_fopen_with_env)(
     const char *envvarname, const char *delim, const char *name,
     const char *mode, apps_std_FILE *psout) __QAIC_IMPL_ATTRIBUTE {
 
   int nErr = AEE_SUCCESS;
-  char *dirName = NULL;
-  char *pos = NULL;
   char *dirListBuf = NULL;
   char *dirList = NULL;
-  char *absName = NULL;
   const char *envVar = NULL;
-  uint16 absNameLen = 0;
-  int domain = get_current_domain() & DOMAIN_ID_MASK;
 
-  FARF(LOW, "Entering %s", __func__);
+  FARF(RUNTIME_RPC_LOW, "Entering %s", __func__);
   VERIFYC(NULL != mode, AEE_EBADPARM);
   VERIFYC(NULL != delim, AEE_EBADPARM);
   VERIFYC(NULL != name, AEE_EBADPARM);
@@ -1030,8 +1112,8 @@ __QAIC_IMPL_EXPORT int __QAIC_IMPL(apps_std_fopen_with_env)(
   FASTRPC_ATRACE_BEGIN_L("%s for %s in %s mode from path in environment "
                          "variable %s delimited with %s",
                          __func__, name, mode, envvarname, delim);
-  if (std_strncmp(envvarname, ADSP_LIBRARY_PATH,
-                  std_strlen(ADSP_LIBRARY_PATH)) == 0) {
+  if (strncmp(envvarname, ADSP_LIBRARY_PATH,
+                  strlen(ADSP_LIBRARY_PATH)) == 0) {
     if (getenv(DSP_LIBRARY_PATH)) {
       envVar = DSP_LIBRARY_PATH;
     } else {
@@ -1045,75 +1127,18 @@ __QAIC_IMPL_EXPORT int __QAIC_IMPL(apps_std_fopen_with_env)(
   VERIFYC(NULL != (dirList = dirListBuf), AEE_EBADPARM);
   FARF(RUNTIME_RPC_HIGH, "%s dirList %s", __func__, dirList);
 
-  while (dirList) {
-    pos = strstr(dirList, delim);
-    dirName = dirList;
-    if (pos) {
-      *pos = '\0';
-      dirList = pos + std_strlen(delim);
-    } else {
-      dirList = 0;
-    }
+  nErr = fopen_from_dirlist(dirList, delim, mode, name, psout);
 
-    // Append domain to path
-    absNameLen =
-        std_strlen(dirName) + std_strlen(name) + 2 + std_strlen("adsp") + 1;
-    VERIFYC(NULL != (absName = (char *)malloc(sizeof(char) * absNameLen)),
-            AEE_ENOMEMORY);
-    if ('\0' != *dirName) {
-      std_strlcpy(absName, dirName, absNameLen);
-      std_strlcat(absName, "/", absNameLen);
-      std_strlcat(absName, SUBSYSTEM_NAME[domain], absNameLen);
-      std_strlcat(absName, "/", absNameLen);
-      std_strlcat(absName, name, absNameLen);
-    } else {
-      std_strlcpy(absName, name, absNameLen);
-    }
-
-    nErr = apps_std_fopen(absName, mode, psout);
-    if (AEE_SUCCESS == nErr) {
-      // Success
-      FARF(ALWAYS, "Successfully opened file %s", absName);
-      goto bail;
-    }
-    FREEIF(absName);
-
-    // fallback: If not found in domain path /vendor/dsp/adsp try in /vendor/dsp
-    absNameLen = std_strlen(dirName) + std_strlen(name) + 2;
-    VERIFYC(NULL != (absName = (char *)malloc(sizeof(char) * absNameLen)),
-            AEE_ENOMEMORY);
-    if ('\0' != *dirName) {
-      std_strlcpy(absName, dirName, absNameLen);
-      std_strlcat(absName, "/", absNameLen);
-      std_strlcat(absName, name, absNameLen);
-    } else {
-      std_strlcpy(absName, name, absNameLen);
-    }
-
-    nErr = apps_std_fopen(absName, mode, psout);
-    if (AEE_SUCCESS == nErr) {
-      // Success
-      if (name != NULL &&
-          (std_strncmp(name, OEM_CONFIG_FILE_NAME,
-                       std_strlen(OEM_CONFIG_FILE_NAME)) != 0) &&
-          (std_strncmp(name, TESTSIG_FILE_NAME,
-                       std_strlen(TESTSIG_FILE_NAME)) != 0))
-        FARF(ALWAYS, "Successfully opened file %s", name);
-      goto bail;
-    }
-    FREEIF(absName);
-  }
 bail:
-  FREEIF(absName);
   FREEIF(dirListBuf);
   if (nErr != AEE_SUCCESS) {
     if (ERRNO != ENOENT ||
         (name != NULL &&
-         std_strncmp(name, OEM_CONFIG_FILE_NAME,
-                     std_strlen(OEM_CONFIG_FILE_NAME)) != 0 &&
-         std_strncmp(name, RPC_VERSION_FILE_NAME,
-                     std_strlen(RPC_VERSION_FILE_NAME)) != 0 &&
-         std_strncmp(name, TESTSIG_FILE_NAME, std_strlen(TESTSIG_FILE_NAME)) !=
+         strncmp(name, OEM_CONFIG_FILE_NAME,
+                     strlen(OEM_CONFIG_FILE_NAME)) != 0 &&
+         strncmp(name, RPC_VERSION_FILE_NAME,
+                     strlen(RPC_VERSION_FILE_NAME)) != 0 &&
+         strncmp(name, TESTSIG_FILE_NAME, strlen(TESTSIG_FILE_NAME)) !=
              0))
       VERIFY_WPRINTF(" Warning: %s failed with 0x%x for %s (%s)", __func__,
                      nErr, name, strerror(ERRNO));
@@ -1139,8 +1164,8 @@ __QAIC_IMPL_EXPORT int __QAIC_IMPL(apps_std_fopen_with_env_fd)(
   char *absName = NULL;
   char *errabsName = NULL;
   const char *envVar = NULL;
-  uint16 absNameLen = 0;
-  int domain = get_current_domain() & DOMAIN_ID_MASK;
+  uint16_t absNameLen = 0;
+  int domain = GET_DOMAIN_FROM_EFFEC_DOMAIN_ID(get_current_domain());
 
   FARF(RUNTIME_RPC_LOW, "Entering %s", __func__);
   VERIFYC(NULL != mode, AEE_EBADPARM);
@@ -1158,8 +1183,8 @@ __QAIC_IMPL_EXPORT int __QAIC_IMPL(apps_std_fopen_with_env_fd)(
   FASTRPC_ATRACE_BEGIN_L("%s for %s in %s mode from path in environment "
                          "variable %s delimited with %s",
                          __func__, name, mode, envvarname, delim);
-  if (std_strncmp(envvarname, ADSP_LIBRARY_PATH,
-                  std_strlen(ADSP_LIBRARY_PATH)) == 0) {
+  if (strncmp(envvarname, ADSP_LIBRARY_PATH,
+                  strlen(ADSP_LIBRARY_PATH)) == 0) {
     if (getenv(DSP_LIBRARY_PATH)) {
       envVar = DSP_LIBRARY_PATH;
     } else {
@@ -1177,24 +1202,24 @@ __QAIC_IMPL_EXPORT int __QAIC_IMPL(apps_std_fopen_with_env_fd)(
     dirName = dirList;
     if (pos) {
       *pos = '\0';
-      dirList = pos + std_strlen(delim);
+      dirList = pos + strlen(delim);
     } else {
       dirList = 0;
     }
 
     // Append domain to path
     absNameLen =
-        std_strlen(dirName) + std_strlen(name) + 2 + std_strlen("adsp") + 1;
+        strlen(dirName) + strlen(name) + 2 + strlen("adsp") + 1;
     VERIFYC(NULL != (absName = (char *)malloc(sizeof(char) * absNameLen)),
             AEE_ENOMEMORY);
     if ('\0' != *dirName) {
-      std_strlcpy(absName, dirName, absNameLen);
-      std_strlcat(absName, "/", absNameLen);
-      std_strlcat(absName, SUBSYSTEM_NAME[domain], absNameLen);
-      std_strlcat(absName, "/", absNameLen);
-      std_strlcat(absName, name, absNameLen);
+      strlcpy(absName, dirName, absNameLen);
+      strlcat(absName, "/", absNameLen);
+      strlcat(absName, SUBSYSTEM_NAME[domain], absNameLen);
+      strlcat(absName, "/", absNameLen);
+      strlcat(absName, name, absNameLen);
     } else {
-      std_strlcpy(absName, name, absNameLen);
+      strlcpy(absName, name, absNameLen);
     }
 
     err = apps_std_fopen_fd(absName, mode, fd, len);
@@ -1214,15 +1239,15 @@ __QAIC_IMPL_EXPORT int __QAIC_IMPL(apps_std_fopen_with_env_fd)(
     FREEIF(absName);
 
     // fallback: If not found in domain path /vendor/dsp/adsp try in /vendor/dsp
-    absNameLen = std_strlen(dirName) + std_strlen(name) + 2;
+    absNameLen = strlen(dirName) + strlen(name) + 2;
     VERIFYC(NULL != (absName = (char *)malloc(sizeof(char) * absNameLen)),
             AEE_ENOMEMORY);
     if ('\0' != *dirName) {
-      std_strlcpy(absName, dirName, absNameLen);
-      std_strlcat(absName, "/", absNameLen);
-      std_strlcat(absName, name, absNameLen);
+      strlcpy(absName, dirName, absNameLen);
+      strlcat(absName, "/", absNameLen);
+      strlcat(absName, name, absNameLen);
     } else {
-      std_strlcpy(absName, name, absNameLen);
+      strlcpy(absName, name, absNameLen);
     }
 
     err = apps_std_fopen_fd(absName, mode, fd, len);
@@ -1251,11 +1276,11 @@ bail:
   if (nErr != AEE_SUCCESS) {
     if (ERRNO != ENOENT ||
         (name != NULL &&
-         std_strncmp(name, OEM_CONFIG_FILE_NAME,
-                     std_strlen(OEM_CONFIG_FILE_NAME)) != 0 &&
-         std_strncmp(name, RPC_VERSION_FILE_NAME,
-                     std_strlen(RPC_VERSION_FILE_NAME)) != 0 &&
-         std_strncmp(name, TESTSIG_FILE_NAME, std_strlen(TESTSIG_FILE_NAME)) !=
+         strncmp(name, OEM_CONFIG_FILE_NAME,
+                     strlen(OEM_CONFIG_FILE_NAME)) != 0 &&
+         strncmp(name, RPC_VERSION_FILE_NAME,
+                     strlen(RPC_VERSION_FILE_NAME)) != 0 &&
+         strncmp(name, TESTSIG_FILE_NAME, strlen(TESTSIG_FILE_NAME)) !=
              0)) {
       if (errabsName) {
         VERIFY_WPRINTF(" Warning: %s failed with 0x%x for path %s name %s (%s)",
@@ -1281,7 +1306,7 @@ bail:
 
 __QAIC_HEADER_EXPORT int __QAIC_IMPL(apps_std_get_search_paths_with_env)(
     const char *envvarname, const char *delim, _cstring1_t *paths, int pathsLen,
-    uint32 *numPaths, uint16 *maxPathLen) __QAIC_IMPL_ATTRIBUTE {
+    uint32_t *numPaths, uint16_t *maxPathLen) __QAIC_IMPL_ATTRIBUTE {
 
   char *path = NULL;
   char *pathDomain = NULL;
@@ -1292,15 +1317,15 @@ __QAIC_HEADER_EXPORT int __QAIC_IMPL(apps_std_get_search_paths_with_env)(
   char *saveptr = NULL;
   const char *envVar = NULL;
   struct stat st;
-  int domain = get_current_domain() & DOMAIN_ID_MASK;
+  int domain = GET_DOMAIN_FROM_EFFEC_DOMAIN_ID(get_current_domain());
 
   FARF(RUNTIME_RPC_LOW, "Entering %s", __func__);
   VERIFYC(NULL != numPaths, AEE_EBADPARM);
   VERIFYC(NULL != delim, AEE_EBADPARM);
   VERIFYC(NULL != maxPathLen, AEE_EBADPARM);
 
-  if (std_strncmp(envvarname, ADSP_LIBRARY_PATH,
-                  std_strlen(ADSP_LIBRARY_PATH)) == 0) {
+  if (strncmp(envvarname, ADSP_LIBRARY_PATH,
+                  strlen(ADSP_LIBRARY_PATH)) == 0) {
     if (getenv(DSP_LIBRARY_PATH)) {
       envVar = DSP_LIBRARY_PATH;
     } else {
@@ -1318,26 +1343,26 @@ __QAIC_HEADER_EXPORT int __QAIC_IMPL(apps_std_get_search_paths_with_env)(
   // Get the number of folders
   path = strtok_r(dirListBuf, delim, &saveptr);
   while (path != NULL) {
-    pathDomainLen = std_strlen(path) + 1 + std_strlen("adsp") + 1;
+    pathDomainLen = strlen(path) + 1 + strlen("adsp") + 1;
     VERIFYC(pathDomain = (char *)malloc(sizeof(char) * (pathDomainLen)),
             AEE_ENOMEMORY);
-    std_strlcpy(pathDomain, path, pathDomainLen);
-    std_strlcat(pathDomain, "/", pathDomainLen);
-    std_strlcat(pathDomain, SUBSYSTEM_NAME[domain], pathDomainLen);
+    strlcpy(pathDomain, path, pathDomainLen);
+    strlcat(pathDomain, "/", pathDomainLen);
+    strlcat(pathDomain, SUBSYSTEM_NAME[domain], pathDomainLen);
     // If the path exists, add it to the return
     if ((stat(pathDomain, &st) == 0) && (S_ISDIR(st.st_mode))) {
-      *maxPathLen = STD_MAX(*maxPathLen, std_strlen(pathDomain) + 1);
+      *maxPathLen = STD_MAX(*maxPathLen, strlen(pathDomain) + 1);
       if (paths && i < pathsLen && paths[i].data &&
-          paths[i].dataLen >= (int)std_strlen(path)) {
-        std_strlcpy(paths[i].data, pathDomain, paths[i].dataLen);
+          paths[i].dataLen >= (int)strlen(path)) {
+        strlcpy(paths[i].data, pathDomain, paths[i].dataLen);
       }
       i++;
     }
     if ((stat(path, &st) == 0) && (S_ISDIR(st.st_mode))) {
-      *maxPathLen = STD_MAX(*maxPathLen, std_strlen(path) + 1);
+      *maxPathLen = STD_MAX(*maxPathLen, strlen(path) + 1);
       if (paths && i < pathsLen && paths[i].data &&
-          paths[i].dataLen >= (int)std_strlen(path)) {
-        std_strlcpy(paths[i].data, path, paths[i].dataLen);
+          paths[i].dataLen >= (int)strlen(path)) {
+        strlcpy(paths[i].data, path, paths[i].dataLen);
       }
       i++;
     }
@@ -1359,7 +1384,7 @@ bail:
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_std_fgets)(apps_std_FILE sin, byte *buf, int bufLen,
+__QAIC_IMPL(apps_std_fgets)(apps_std_FILE sin, unsigned char *buf, int bufLen,
                             int *bEOF) __QAIC_IMPL_ATTRIBUTE {
   int nErr = AEE_SUCCESS;
   struct apps_std_info *sinfo = 0;
@@ -1369,7 +1394,7 @@ __QAIC_IMPL(apps_std_fgets)(apps_std_FILE sin, byte *buf, int bufLen,
   VERIFY(0 == (nErr = apps_std_FILE_get(sin, &sinfo)));
   if (sinfo->type == APPS_STD_STREAM_FILE) {
     char *out = fgets((char *)buf, bufLen, sinfo->u.stream);
-    *bEOF = FALSE;
+    *bEOF = false;
     if (!out) {
       int err = 0;
       if (0 != (err = ferror(sinfo->u.stream))) {
@@ -1390,7 +1415,7 @@ bail:
 
 __QAIC_HEADER_EXPORT int
 __QAIC_HEADER(apps_std_fileExists)(const char *path,
-                                   boolean *exists) __QAIC_HEADER_ATTRIBUTE {
+                                   bool *exists) __QAIC_HEADER_ATTRIBUTE {
   int nErr = AEE_SUCCESS, err = 0;
   struct stat buffer;
 
@@ -1546,7 +1571,7 @@ __QAIC_HEADER(apps_std_opendir)(const char *name,
   errno = 0;
   odir = opendir(name);
   if (odir != NULL) {
-    dir->handle = (uint64)odir;
+    dir->handle = (uint64_t)odir;
     dirinfo =
         (struct apps_std_dir_info *)calloc(1, sizeof(struct apps_std_dir_info));
     VERIFYC(dirinfo != NULL, ENOMEM);
@@ -1614,7 +1639,7 @@ __QAIC_HEADER(apps_std_readdir)(const apps_std_DIR *dir,
   odirent = readdir((DIR *)dir->handle);
   if (odirent != NULL) {
     dirent->ino = (int)odirent->d_ino;
-    std_strlcpy(dirent->name, odirent->d_name, sizeof(dirent->name));
+    strlcpy(dirent->name, odirent->d_name, sizeof(dirent->name));
   } else {
     if (errno == 0) {
       *bEOF = 1;
@@ -1634,18 +1659,23 @@ bail:
 __QAIC_IMPL_EXPORT int __QAIC_HEADER(apps_std_mkdir)(const char *name, int mode)
     __QAIC_IMPL_ATTRIBUTE {
   int nErr = AEE_SUCCESS;
+  uint64_t tdiff = 0;
 
   if (NULL == name) {
     return EINVAL;
   }
+  FASTRPC_ATRACE_BEGIN();
   errno = 0;
-  nErr = mkdir(name, mode);
+  PROFILE_ALWAYS(&tdiff,
+      nErr = mkdir(name, mode);
+  );
   if (nErr != AEE_SUCCESS) {
     nErr = ERRNO;
     VERIFY_EPRINTF("Error 0x%x: failed to mkdir %s,errno is %s\n", nErr, name,
                    strerror(ERRNO));
   }
-
+  FASTRPC_ATRACE_END_L("%s done for %s mode %d in %"PRIu64" us error_code 0x%x",
+      __func__, name, mode, tdiff, nErr);
   return nErr;
 }
 
@@ -1674,6 +1704,7 @@ __QAIC_HEADER(apps_std_stat)(const char *name,
   apps_std_FILE ps;
   struct apps_std_info *sinfo = 0;
   struct stat st;
+   uint64_t tdiff = 0;
 
   if ((NULL == name) || (NULL == ist)) {
     return EINVAL;
@@ -1686,19 +1717,22 @@ __QAIC_HEADER(apps_std_stat)(const char *name,
           nErr);
   VERIFY(0 == (nErr = apps_std_FILE_get(ps, &sinfo)));
   VERIFYC(-1 != (fd = fileno(sinfo->u.stream)), ERRNO);
-  VERIFYC(0 == fstat(fd, &st), ERRNO);
+  PROFILE_ALWAYS(&tdiff,
+  nErr = fstat(fd, &st);;
+  );
+  VERIFYC(nErr == AEE_SUCCESS, ERRNO);  
   ist->dev = st.st_dev;
   ist->ino = st.st_ino;
   ist->mode = st.st_mode;
   ist->nlink = st.st_nlink;
   ist->rdev = st.st_rdev;
   ist->size = st.st_size;
-  ist->atime = (int64)st.st_atim.tv_sec;
-  ist->atimensec = (int64)st.st_atim.tv_nsec;
-  ist->mtime = (int64)st.st_mtim.tv_sec;
-  ist->mtimensec = (int64)st.st_mtim.tv_nsec;
-  ist->ctime = (int64)st.st_ctim.tv_nsec;
-  ist->ctimensec = (int64)st.st_ctim.tv_nsec;
+  ist->atime = (int64_t)st.st_atim.tv_sec;
+  ist->atimensec = (int64_t)st.st_atim.tv_nsec;
+  ist->mtime = (int64_t)st.st_mtim.tv_sec;
+  ist->mtimensec = (int64_t)st.st_mtim.tv_nsec;
+  ist->ctime = (int64_t)st.st_ctim.tv_nsec;
+  ist->ctimensec = (int64_t)st.st_ctim.tv_nsec;
 bail:
   if (nErr != AEE_SUCCESS) {
     VERIFY_EPRINTF(
@@ -1713,7 +1747,8 @@ bail:
   if (sinfo) {
     apps_std_FILE_free(sinfo);
   }
-  FASTRPC_ATRACE_END();
+  FASTRPC_ATRACE_END_L("%s done for %s in %"PRIu64" us \
+      fd 0x%x error_code 0x%x", __func__, name, tdiff, ps, nErr);
   return nErr;
 }
 

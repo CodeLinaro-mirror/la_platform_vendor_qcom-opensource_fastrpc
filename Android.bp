@@ -1,0 +1,262 @@
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
+
+//==========================================================
+// Qualcomm FastRPC (open-source) — Soong build definitions
+// Generates domain client libs, default listeners, and daemons
+//==========================================================
+
+//----------------------------------------------------------
+// Headers export (installable to dependents)
+//----------------------------------------------------------
+cc_library_headers {
+    name: "adsprpc_inc_headers",
+    export_include_dirs: ["inc"],
+    owner: "qti",
+    vendor_available: true,
+    recovery_available: true,
+}
+
+//----------------------------------------------------------
+// Common source groups
+//----------------------------------------------------------
+filegroup {
+    name: "fastrpc_core_sources",
+    srcs: [
+        // Core FastRPC sources
+        "src/fastrpc_apps_user.c",
+        "src/fastrpc_async.c",
+        "src/fastrpc_cap.c",
+        "src/fastrpc_config.c",
+        "src/fastrpc_context.c",
+        "src/fastrpc_ioctl.c",
+        "src/fastrpc_log.c",
+        "src/fastrpc_mem.c",
+        "src/fastrpc_notif.c",
+        "src/fastrpc_perf.c",
+        "src/fastrpc_pm.c",
+        "src/fastrpc_procbuf.c",
+
+        // Android/platform glue
+        "src/listener_android.c",
+        "src/platform_libs.c",
+        "src/pl_list.c",
+        "src/log_config.c",
+        "src/gpls.c",
+
+        // IDL stubs / skels used by client side
+        "src/remotectl_stub.c",
+        "src/remotectl1_stub.c",
+        "src/adsp_current_process_stub.c",
+        "src/adsp_current_process1_stub.c",
+        "src/adsp_listener_stub.c",
+        "src/adsp_listener1_stub.c",
+        "src/apps_std_imp.c",
+        "src/apps_std_skel.c",
+        "src/apps_mem_imp.c",
+        "src/apps_mem_skel.c",
+        "src/apps_remotectl_skel.c",
+        "src/adspmsgd.c",
+        "src/adspmsgd_printf.c",
+        "src/adspmsgd_adsp_stub.c",
+        "src/adspmsgd_adsp1_stub.c",
+        "src/adspmsgd_apps_skel.c",
+        "src/adsp_perf_stub.c",
+        "src/adsp_perf1_stub.c",
+
+        // rpcmem (Android build leverages this upstream file)
+        "src/rpcmem_linux.c",
+
+        // misc utils
+        "src/BufBound.c",
+        "src/std_dtoa.c",
+        "src/std_path.c",
+        "src/mod_table.c",
+        "src/dspsignal.c",
+
+        // dspqueue
+        "src/dspqueue/*.c",
+    ],
+}
+
+// Default listeners use these sources
+filegroup {
+    name: "fastrpc_default_listener_sources",
+    srcs: [
+        "src/adsp_default_listener.c",
+        "src/adsp_default_listener_stub.c",
+        "src/adsp_default_listener1_stub.c",
+    ],
+}
+
+// Version scripts shipped by the repo
+filegroup {
+    name: "fastrpc_version_script",
+    srcs: ["src/symbols.lst"],
+}
+
+filegroup {
+    name: "fastrpc_default_listener_version_script",
+    srcs: ["src/adsp_def_symbols.lst"],
+}
+
+//----------------------------------------------------------
+// Common defaults (cflags, includes, linkage)
+//----------------------------------------------------------
+cc_defaults {
+    name: "fastrpc_common_defaults",
+    local_include_dirs: ["inc"],
+    header_libs: ["adsprpc_inc_headers"],
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Wno-error=unused-function",
+        "-D_GNU_SOURCE",
+    ],
+
+    // Android vendor side
+    vendor: true,
+
+    shared_libs: [
+        "libc",    // bionic
+        "libdl",
+        "liblog",
+        "libcutils",
+        "libdmabufheap",
+    ],
+
+    // Export constrained symbol set for the client libs
+    version_script: ":fastrpc_version_script",
+
+    sanitize: {
+        integer_overflow: true,
+    },
+
+    compile_multilib: "both", // build 32/64 if product expects both
+}
+
+//----------------------------------------------------------
+// Domain client libraries (set default domain via cflags)
+// ADSP=0, MDSP=1, SDSP=2, CDSP=3
+//----------------------------------------------------------
+
+// libadsprpc.so
+cc_library_shared {
+    name: "libadsprpc",
+    defaults: ["fastrpc_common_defaults"],
+    srcs: [":fastrpc_core_sources"],
+    cflags: ["-DDEFAULT_DOMAIN_ID=0",
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+}
+
+// libmdsprpc.so (optional; keep if your target uses mDSP)
+cc_library_shared {
+    name: "libmdsprpc",
+    defaults: ["fastrpc_common_defaults"],
+    srcs: [":fastrpc_core_sources"],
+    cflags: ["-DDEFAULT_DOMAIN_ID=1",
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+}
+
+// libsdsprpc.so
+cc_library_shared {
+    name: "libsdsprpc",
+    defaults: ["fastrpc_common_defaults"],
+    srcs: [":fastrpc_core_sources"],
+    cflags: ["-DDEFAULT_DOMAIN_ID=2",
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+}
+
+// libcdsprpc.so
+cc_library_shared {
+    name: "libcdsprpc",
+    defaults: ["fastrpc_common_defaults"],
+    srcs: [":fastrpc_core_sources"],
+    cflags: ["-DDEFAULT_DOMAIN_ID=3",
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+}
+
+//----------------------------------------------------------
+// Default listener libraries (one per domain)
+// All use the same sources + per-domain linkage
+//----------------------------------------------------------
+
+// aDSP default listener
+cc_library_shared {
+    name: "libadsp_default_listener",
+    local_include_dirs: ["inc"],
+    header_libs: ["adsprpc_inc_headers"],
+    srcs: [":fastrpc_default_listener_sources"],
+    shared_libs: ["libdl", "liblog", "libadsprpc"],
+    cflags: ["-Wall", "-Wextra", "-Wno-error=unused-function",
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+    version_script: ":fastrpc_default_listener_version_script",
+    sanitize: { integer_overflow: true },
+    vendor: true,
+}
+
+// cDSP default listener
+cc_library_shared {
+    name: "libcdsp_default_listener",
+    local_include_dirs: ["inc"],
+    header_libs: ["adsprpc_inc_headers"],
+    srcs: [":fastrpc_default_listener_sources"],
+    shared_libs: ["libdl", "liblog", "libcdsprpc"],
+    cflags: ["-Wall", "-Wextra", "-Wno-error=unused-function",
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+    version_script: ":fastrpc_default_listener_version_script",
+    sanitize: { integer_overflow: true },
+    vendor: true,
+}
+
+// sDSP default listener
+cc_library_shared {
+    name: "libssc_default_listener",
+    local_include_dirs: ["inc"],
+    header_libs: ["adsprpc_inc_headers"],
+    srcs: [":fastrpc_default_listener_sources"],
+    shared_libs: ["libdl", "liblog", "libsdsprpc"],
+    cflags: ["-Wall", "-Wextra", "-Wno-error=unused-function",
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+    version_script: ":fastrpc_default_listener_version_script",
+    sanitize: { integer_overflow: true },
+    vendor: true,
+}
+
+//----------------------------------------------------------
+// Daemons (one binary per domain, built from dsprpcd.c)
+//----------------------------------------------------------
+cc_defaults {
+    name: "fastrpc_daemon_defaults",
+    local_include_dirs: ["inc"],
+    header_libs: ["adsprpc_inc_headers"],
+    srcs: ["src/dsprpcd.c"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+    shared_libs: ["liblog", "libdl"],
+    sanitize: { integer_overflow: true },
+    vendor: true,
+}
+
+// adsprpcd
+cc_binary {
+    name: "adsprpcd_guestos",
+    defaults: ["fastrpc_daemon_defaults"],
+    shared_libs: ["liblog", "libdl", "libadsprpc"],
+    cflags: ["-DUSE_ADSP", "-DDEFAULT_DOMAIN_ID=0"],
+    init_rc: [
+        "src/vendor.qti.adsprpc-guestos-service.rc",
+    ],
+    stem: "adsprpcd",
+}
+
+// cdsprpcd
+cc_binary {
+    name: "cdsprpcd",
+    defaults: ["fastrpc_daemon_defaults"],
+    shared_libs: ["liblog", "libdl", "libcdsprpc"],
+    cflags: ["-DUSE_CDSP", "-DDEFAULT_DOMAIN_ID=3"],
+    init_rc: [
+        "src/vendor.qti.cdsprpc-service.rc",
+    ],
+}

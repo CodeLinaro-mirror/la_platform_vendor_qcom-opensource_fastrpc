@@ -1,6 +1,7 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
+#define _GNU_SOURCE
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -8,13 +9,14 @@
 #include <string.h>
 #include <sys/time.h>
 #include <limits.h>
+#include <unistd.h>
 
 #include "AEEStdErr.h"
 #include "fastrpc_config.h"
 #include "HAP_farf_internal.h"
 #include "fastrpc_common.h"
 #include "fastrpc_trace.h"
-#include "rpcmem.h"
+#include "rpcmem_internal.h"
 #include "verify.h"
 
 #define PROPERTY_VALUE_MAX 72
@@ -28,7 +30,8 @@
 #define DEBUF_BUF_TRACE "frpc_dbgbuf:"
 
 #define IS_PERSIST_BUF_DATA(len, level)                                        \
-  ((len > 0) && (len < MAX_FARF_LEN) && (level == HAP_LEVEL_RPC_CRITICAL))
+  ((len > 0) && (len < MAX_FARF_LEN) && (level == HAP_LEVEL_RPC_CRITICAL || \
+						  level == HAP_LEVEL_CRITICAL))
 
 typedef struct persist_buffer {
   /* Debug logs to be printed on dsp side */
@@ -299,7 +302,7 @@ void fastrpc_log_init() {
   }
   if (persist_buf.buf == NULL && debug_build_type) {
     /* Create a debug buffer to append DEBUG FARF level message. */
-    persist_buf.buf = (char *)rpcmem_alloc(
+    persist_buf.buf = (char *)rpcmem_alloc_internal(
         RPCMEM_HEAP_ID_SYSTEM, RPCMEM_DEFAULT_FLAGS | RPCMEM_TRY_MAP_STATIC,
         DEBUG_BUF_SIZE * sizeof(char));
     if (persist_buf.buf) {
@@ -308,7 +311,7 @@ void fastrpc_log_init() {
            fd, DEBUG_BUF_SIZE);
       /* Appending header to persist buffer, to identify the start address
        * through script. */
-      std_strlcpy(persist_buf.buf, DEBUF_BUF_TRACE, DEBUG_BUF_SIZE);
+      strlcpy(persist_buf.buf, DEBUF_BUF_TRACE, DEBUG_BUF_SIZE);
       persist_buf.size = strlen(DEBUF_BUF_TRACE) + 1;
     } else {
       nErr = AEE_ENORPCMEMORY;

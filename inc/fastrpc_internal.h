@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 
 #ifndef FASTRPC_INTERNAL_H
 #define FASTRPC_INTERNAL_H
@@ -15,7 +15,6 @@
 #include "AEEstd.h"
 #include "AEEQList.h"
 #include "AEEStdErr.h"
-#include "fastrpc_latency.h"
 #include "fastrpc_common.h"
 
 // Aligns the memory
@@ -35,7 +34,7 @@
 /* Additional URI length required to add domain and session information to URI
  * Two extra characters for session ID > 9 and domain name more than 4 characters.
  */
-#define FASTRPC_URI_BUF_LEN (strlen(CDSP_DOMAIN) + strlen(FASTRPC_SESSION1_URI) + 2)
+#define FASTRPC_URI_BUF_LEN (strlen(CDSP1_DOMAIN) + strlen(FASTRPC_SESSION1_URI) + 2)
 
 /**
  * Maximum values of enums exposed in remote
@@ -47,7 +46,7 @@
 #define FASTRPC_ASYNC_TYPE_MAX FASTRPC_ASYNC_POLL + 1
 
 /* Max value of remote_dsp_attributes, used to validate the attribute ID*/
-#define FASTRPC_MAX_DSP_ATTRIBUTES STATUS_NOTIFICATION_SUPPORT + 1
+#define FASTRPC_MAX_DSP_ATTRIBUTES MCID_MULTICAST + 1
 
 /* Max value of remote_mem_map_flags, used to validate the input flag */
 #define REMOTE_MAP_MAX_FLAG REMOTE_MAP_MEM_STATIC + 1
@@ -56,7 +55,7 @@
 #define FASTRPC_MAP_MAX FASTRPC_MAP_FD_NOMAP + 1
 
 #if !(defined __qdsp6__) && !(defined __hexagon__)
-static __inline uint32 Q6_R_cl0_R(uint32 num) {
+static __inline uint32_t Q6_R_cl0_R(uint32_t num) {
    int ii;
    for(ii = 31; ii >= 0; --ii) {
       if(num & (1 << ii)) {
@@ -77,6 +76,24 @@ static __inline uint32 Q6_R_cl0_R(uint32 num) {
 /* From actual domain ID (0-3) and session ID, get effective domain ID */
 #define GET_EFFECTIVE_DOMAIN_ID(domain, session) (domain + (NUM_DOMAINS * session))
 
+/* From effective domain ID, get actual domain ID */
+#define GET_DOMAIN_FROM_EFFEC_DOMAIN_ID(effec_dom_id) (effec_dom_id & DOMAIN_ID_MASK)
+
+/* Check if given domain ID is in valid range */
+#define IS_VALID_DOMAIN_ID(domain) ((domain >= 0) && (domain < NUM_DOMAINS))
+
+/* Check if given effective domain ID is in valid range */
+#define IS_VALID_EFFECTIVE_DOMAIN_ID(domain) ((domain >= 0) && (domain < NUM_DOMAINS_EXTEND))
+
+/* Check if given effective domain ID is in extended range */
+#define IS_EXTENDED_DOMAIN_ID(domain) ((domain >= NUM_DOMAINS) && (domain < NUM_DOMAINS_EXTEND))
+
+/* Loop thru list of all domain ids */
+#define FOR_EACH_DOMAIN_ID(i) for(i = 0; i < NUM_DOMAINS; i++)
+
+/* Loop thru list of all effective domain ids */
+#define FOR_EACH_EFFECTIVE_DOMAIN_ID(i) for(i = 0; i < NUM_DOMAINS_EXTEND; i++)
+
 /**
  * @brief  PD initialization types used to create different kinds of PD
  * Attach is used for attaching the curent APPS process to the existing
@@ -89,23 +106,6 @@ static __inline uint32 Q6_R_cl0_R(uint32 num) {
 #define FASTRPC_INIT_CREATE      1
 #define FASTRPC_INIT_CREATE_STATIC  2
 #define FASTRPC_INIT_ATTACH_SENSORS 3
-
-/**
-  * @brief Process types on remote subsystem
-  * Always add new PD types at the end, before MAX_PD_TYPE,
-  * for maintaining back ward compatibility
- **/
-#define DEFAULT_UNUSED    0  /* pd type not configured for context banks */
-#define ROOT_PD           1  /* Root PD */
-#define AUDIO_STATICPD    2  /* ADSP Audio Static PD */
-#define SENSORS_STATICPD  3  /* ADSP Sensors Static PD */
-#define SECURE_STATICPD   4  /* CDSP Secure Static PD */
-#define OIS_STATICPD      5  /* ADSP OIS Static PD */
-#define CPZ_USERPD        6  /* CDSP CPZ USER PD */
-#define USERPD            7  /* DSP User Dynamic PD */
-#define GUEST_OS_SHARED   8  /* Legacy Guest OS Shared */
-#define MAX_PD_TYPE       9  /* Max PD type */
-
 
 // Attribute to specify the process is a debug process
 #define FASTRPC_ATTR_DEBUG_PROCESS (1)
@@ -194,38 +194,6 @@ enum fastrpc_control_type {
 };
 
 /**
-  * @brief internal data strcutures used in remote handle control
-  *  fastrpc_ctrl_latency -
-  *  fastrpc_ctrl_smmu - Allows the PD to use the shared SMMU context banks
-  *  fastrpc_ctrl_kalloc - feature to allow the kernel allocate memory
-  *                        for signed PD memory needs.
-  *  fastrpc_ctrl_wakelock - enabled wake lock in user space and kernel
-  *                          improves the response latency time of remote calls
-  *  fastrpc_ctrl_pm - timeout (in ms) for which the system should stay awake
-  *
-  **/
-struct fastrpc_ctrl_latency {
-	uint32_t enable;
-	uint32_t latency;
-};
-
-struct fastrpc_ctrl_smmu {
-	uint32_t sharedcb;
-};
-
-struct fastrpc_ctrl_kalloc {
-	uint32_t kalloc_support;
-};
-
-struct fastrpc_ctrl_wakelock {
-	uint32_t enable;
-};
-
-struct fastrpc_ctrl_pm {
-	uint32_t timeout;
-};
-
-/**
   * @enum different types of remote invoke supported in fastRPC
   * internal datastructures.
   * INVOKE - only parameters allowed
@@ -303,10 +271,8 @@ struct fastrpc_map {
   *    dsppd - Type of the process that should be created on DSP (specific domain)
   *    dsppdname - Name of the process
   *    sessionname - Name of the session, if more than one process created on same DSP
-  *    domainsupport - Legacy field, should be 1 always.
   *    kmem_support - Stores whether kernel can allocate memory for signed process
   *    dev - file descriptor returned by open(<fastrpc_device_node>)
-  *    pdmem - Memory to store DSP process configurations
   *    cphandle, msghandle, lsitenerhandle, remotectlhandle, adspperfhandle - static
   *            handles created for the stub files loaded by fastRPC.
   *    procattrs - Attributes for the DSP Process. Stores information like debug process,
@@ -330,20 +296,18 @@ struct handle_list {
 	int dsppd;
 	char dsppdname[MAX_DSPPD_NAMELEN];
 	char sessionname[MAX_DSPPD_NAMELEN];
-	int domainsupport;
 	int kmem_support;
 	int dev;
 	int setmode;
 	uint32_t mode;
 	uint32_t info;
-	void* pdmem;
 	remote_handle64 cphandle;
 	remote_handle64 msghandle;
 	remote_handle64 listenerhandle;
 	remote_handle64 remotectlhandle;
 	remote_handle64 adspperfhandle;
 	int procattrs;
-	struct fastrpc_latency qos;
+	int adaptive_qos;
 	struct fastrpc_thread_params th_params;
 	int unsigned_module;
 	bool pd_dump;
@@ -357,7 +321,7 @@ struct handle_list {
 	/* Mutex to synchronize ASync init and deinit */
 	pthread_mutex_t async_init_deinit_mut;
 	uint32_t pd_initmem_size;  /** Initial memory allocated for remote userPD */
-	uint32_t open_handle_count;           // Number of open handles
+	uint32_t refs;       // Number of multi-domain handles + contexts on session
 	bool is_session_reserved;   /** Set if session is reserved or used */
 	/* buffer shared with DSP containing initial config parameters */
 	void *proc_sharedbuf;
@@ -369,7 +333,7 @@ struct handle_list {
   * @brief API to get the DSP_SEARCH_PATH stored locally as static.
   * @get_path : get_path will be updated with the path stored in DSP_SEARCH_PATH locally.
   **/
-void get_default_dsp_search_path(char* path);
+const char* get_dsp_search_path();
 
 /**
   * @brief API to map memory to the remote domain
@@ -401,16 +365,6 @@ int fastrpc_get_cap(uint32_t domain, uint32_t attributeID, uint32_t *capability)
   *
   **/
 int check_rpc_error(int err);
-
-/**
-  * @brief Notify the FastRPC QoS logic of activity outside of the invoke code path
-  * that should still be considered in QoS timeout calculations.
-  * Note that the function will silently fail on errors such as the domain
-  * not having a valid QoS mode.
-  *
-  * @param[in] domain DSP domain
-  **/
-void fastrpc_qos_activity(int domain);
 
 /**
   * @brief Make IOCTL call to exit async thread
@@ -494,6 +448,10 @@ static __inline int convert_kernel_to_user_error(int nErr, int err_no) {
 	case EPERM: /* EPERM 1 Operation not permitted */
 		nErr = AEE_EBADPERMS;
 		break;
+  case ENOENT: /* No such file or directory */
+    nErr = AEE_ENOSUCH;
+  case EBUSY: /* Device or resource busy */
+    nErr = AEE_EITEMBUSY;
 	default:
 		nErr = AEE_ERPC;
 		break;
@@ -501,9 +459,6 @@ static __inline int convert_kernel_to_user_error(int nErr, int err_no) {
 
 	return nErr;
 }
-
-// Warning message to use domains
-#define PRINT_WARN_USE_DOMAINS() VERIFY_WPRINTF("Warning: %s: Non-domain usage of FastRPC will be deprecated, use domains to offload to DSP using FastRPC", __func__)
 
 /**
   * @brief utility APIs used in fastRPC library to get name, handle from domain 
@@ -530,12 +485,12 @@ remote_handle64 get_adsp_perf1_handle(int domain);
   * @returns: 0 on success, valid non-zero error code on failure
   *
   **/
-int fastrpc_update_module_list(uint32_t req, int domain, remote_handle64 handle, remote_handle64 *local);
+int fastrpc_update_module_list(uint32_t req, int domain, remote_handle64 handle, remote_handle64 *local, const char *name);
 
 /**
   * @brief functions to wrap ioctl syscalls for downstream and upstream kernel
   **/
-int ioctl_init(int dev, uint32_t flags, int attr, byte* shell, int shelllen, int shellfd, char* initmem, int initmemlen, int initmemfd, int tessiglen);
+int ioctl_init(int dev, uint32_t flags, int attr, unsigned char* shell, int shelllen, int shellfd, char* initmem, int initmemlen, int initmemfd, int tessiglen);
 int ioctl_invoke(int dev, int req, remote_handle handle, uint32_t sc, void* pra, int* fds, unsigned int* attrs, void *job, unsigned int* crc, uint64_t* perf_kernel, uint64_t* perf_dsp);
 int ioctl_invoke2_response(int dev, fastrpc_async_jobid *jobid, remote_handle *handle, uint32_t *sc, int* result, uint64_t *perf_kernel, uint64_t *perf_dsp);
 int ioctl_invoke2_notif(int dev, int *domain, int *session, int *status);
@@ -554,6 +509,24 @@ int ioctl_signal_cancel_wait(int dev, uint32_t signal);
 int ioctl_sharedbuf(int dev, struct fastrpc_proc_sharedbuf_info *sharedbuf_info);
 int ioctl_session_info(int dev, struct fastrpc_proc_sess_info *sess_info);
 int ioctl_optimization(int dev, uint32_t max_concurrency);
+
+/*
+ * Manage multi-domain context in kernel (register / remove)
+ *
+ * @param[in]     dev            : device for ioctl call
+ * @param[in]     req            : type of context manage request
+ * @param[in]     user_ctx       : context generated in user
+ * @param[in]     domain_ids     : list of domains in context
+ * @param[in]     num_domain_ids : number of domains
+ * @param[in/out] ctx            : kernel-generated context id. Output ptr
+ *                                 for setup req and input value for
+ *                                 remove request.
+ *
+ * returns 0 on success
+ */
+int ioctl_mdctx_manage(int dev, int req, void *user_ctx,
+	unsigned int *domain_ids, unsigned int num_domain_ids, uint64_t *ctx);
+
 const char* get_secure_domain_name(int domain_id);
 int is_async_fastrpc_supported(void);
 

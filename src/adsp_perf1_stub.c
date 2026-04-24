@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef _ADSP_PERF1_STUB_H
 #define _ADSP_PERF1_STUB_H
@@ -179,7 +179,7 @@ struct SequenceType {
    uint32_t               routSizePrimROut;
 };
 
-//byte offset from the start of the case values for
+//unsigned char offset from the start of the case values for
 //this unions case value array.  it MUST be aligned
 //at the alignment requrements for the descriptor
 //
@@ -335,7 +335,7 @@ static __inline int _stub_method_1(remote_handle64 _handle, uint32_t _mid, char*
    }
    return _nErr;
 }
-__QAIC_STUB_EXPORT int __QAIC_STUB(adsp_perf1_get_usecs)(remote_handle64 _handle, int64* dst, int dstLen) __QAIC_STUB_ATTRIBUTE {
+__QAIC_STUB_EXPORT int __QAIC_STUB(adsp_perf1_get_usecs)(remote_handle64 _handle, int64_t* dst, int dstLen) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 3;
    return _stub_method_1(_handle, _mid, (char**)&dst, (uint32_t*)&dstLen);
 }

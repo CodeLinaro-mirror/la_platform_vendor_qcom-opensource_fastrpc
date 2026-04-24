@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 
 #ifndef _REMOTECTL_H
 #define _REMOTECTL_H
@@ -44,8 +44,8 @@ typedef struct _cstring1_s {
 #define _const_remotectl_handle 0
 __QAIC_HEADER_EXPORT int __QAIC_HEADER(remotectl_open)(const char* name, int* handle, char* dlerror, int dlerrorLen, int* nErr) __QAIC_HEADER_ATTRIBUTE;
 __QAIC_HEADER_EXPORT int __QAIC_HEADER(remotectl_close)(int handle, char* dlerror, int dlerrorLen, int* nErr) __QAIC_HEADER_ATTRIBUTE;
-__QAIC_HEADER_EXPORT int __QAIC_HEADER(remotectl_grow_heap)(uint32 phyAddr, uint32 nSize) __QAIC_HEADER_ATTRIBUTE;
-__QAIC_HEADER_EXPORT int __QAIC_HEADER(remotectl_set_param)(int reqID, const uint32* params, int paramsLen) __QAIC_HEADER_ATTRIBUTE;
+__QAIC_HEADER_EXPORT int __QAIC_HEADER(remotectl_grow_heap)(uint32_t phyAddr, uint32_t nSize) __QAIC_HEADER_ATTRIBUTE;
+__QAIC_HEADER_EXPORT int __QAIC_HEADER(remotectl_set_param)(int reqID, const uint32_t* params, int paramsLen) __QAIC_HEADER_ATTRIBUTE;
 #ifdef __cplusplus
 }
 #endif

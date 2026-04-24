@@ -1,11 +1,12 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef DSPQUEUE_SHARED_H
 #define DSPQUEUE_SHARED_H
 
 #include <stdint.h>
-
+#include <stdbool.h>
+#include "dspqueue.h"
 
 /* Shared memory queue definitions.
 
@@ -107,6 +108,26 @@ struct dspqueue_process_queue_state {
     uint32_t resp_space_count[DSPQUEUE_MAX_PROCESS_QUEUES];
 };
 
+/* Info specific to multi-domain queues */
+struct dspqueue_multidomain {
+	/* Flag to indicate if queue is multidomain */
+	bool is_mdq;
+
+	/* Multi-domain context id associated with queue */
+	uint64_t ctx;
+
+	/* Number of domains on which queue was created */
+	unsigned int num_domain_ids;
+
+	/* Effective domain ids on which queue was created */
+	unsigned int *effec_domain_ids;
+
+	/* Array of queue handles - one for each domain */
+	dspqueue_t *queues;
+
+	/* Array of queue ids - one for each domain */
+	uint64_t *dsp_ids;
+};
 
 /* Signals IDs used with driver signaling. Update the signal allocations in dspsignal.h
    if this changes. */

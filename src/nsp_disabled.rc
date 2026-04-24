@@ -1,0 +1,9 @@
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
+
+service vendor.cdsprpcd /vendor/bin/cdsprpcd
+   override
+   class main
+   user system
+   group system
+   disabled

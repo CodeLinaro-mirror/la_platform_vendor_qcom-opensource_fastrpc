@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 
 #ifndef FASTRPC_COMMON_H
 #define FASTRPC_COMMON_H
@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/time.h>
 
 /* Header file used by all other modules
  * will contain the most critical defines
@@ -19,13 +20,13 @@
 
 /* Number of subsystem supported by fastRPC*/
 #ifndef NUM_DOMAINS
-#define NUM_DOMAINS 4
+#define NUM_DOMAINS 8
 #endif /*NUM_DOMAINS*/
 
 /* Number of sessions allowed per process */
 #ifndef NUM_SESSIONS
 #define NUM_SESSIONS 4
-#define DOMAIN_ID_MASK 3
+#define DOMAIN_ID_MASK 7
 #endif /*NUM_SESSIONS*/
 
 /* Default domain id, in case of non domains*/
@@ -93,6 +94,22 @@
 									  ref = 0;	\
                                     }
 
+/**
+  * @brief Process types on remote subsystem
+  * Always add new PD types at the end, before MAX_PD_TYPE,
+  * for maintaining back ward compatibility
+ **/
+#define DEFAULT_UNUSED    0  /* pd type not configured for context banks */
+#define ROOT_PD           1  /* Root PD */
+#define AUDIO_STATICPD    2  /* ADSP Audio Static PD */
+#define SENSORS_STATICPD  3  /* ADSP Sensors Static PD */
+#define SECURE_STATICPD   4  /* CDSP Secure Static PD */
+#define OIS_STATICPD      5  /* ADSP OIS Static PD */
+#define CPZ_USERPD        6  /* CDSP CPZ USER PD */
+#define USERPD            7  /* DSP User Dynamic PD */
+#define GUEST_OS_SHARED   8  /* Legacy Guest OS Shared */
+#define MAX_PD_TYPE       9  /* Max PD type */
+
 /*
  * Enum defined for fastrpc User Properties
  * @fastrpc_properties: Object of enum
@@ -130,6 +147,11 @@ enum fastrpc_internal_attributes {
    FASTRPC_MAX_ATTRIBUTES  = DSPSIGNAL_DRIVER_SUPPORT + 1, /**<  Max DSP/Kernel attributes supported */
 };
 
+/* Utility function to get pd type of a DSP domain
+ * @domain: DSP domain ID
+ * @return -1 if device not opened and pd type if opened
+ */
+int fastrpc_get_pd_type(int domain);
 /**
   * @brief API to initialize the global data strcutures in fastRPC library
   */
@@ -146,7 +168,7 @@ int fastrpc_session_open(int domain, int *dev);
 /**
   * @brief closes the remote session/file descriptor of the fastrpc device node
   */
-int fastrpc_session_close(int dev);
+void fastrpc_session_close(int domain, int dev);
 /**
   * @brief increments the reference count of the domain
   *  used to identify whether there are any active remote calls for a specific domain
@@ -189,5 +211,26 @@ int fastrpc_get_property_string(fastrpc_properties UserPropertyKey, char * value
  *          FALSE if process is not exiting.
  */
 bool is_process_exiting(int domain);
+
+/* Opens device node based on the domain
+ * This function takes care of the backward compatibility to open
+ * approriate device for following configurations of the device nodes
+ * 1. 4 different device nodes
+ * 2. 1 device node (adsprpc-smd)
+ * 3. 2 device nodes (adsprpc-smd, adsprpc-smd-secure)
+ * Algorithm
+ * For ADSP, SDSP, MDSP domains:
+ *   Open secure device node fist
+ *     if no secure device, open actual device node
+ *     if still no device, open default node
+ *     if failed to open the secure node due to permission,
+ *     open default node
+ * For CDSP domain:
+ *   Open secure device node fist
+ *    If the node does not exist or if no permission, open actual device node
+ *    If still no device, open default node
+ *    If no permission to access the default node, access thorugh HAL.
+ */
+int open_device_node(int domain_id);
 
 #endif //FASTRPC_COMMON_H

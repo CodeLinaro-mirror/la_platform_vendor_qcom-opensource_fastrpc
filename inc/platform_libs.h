@@ -1,6 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
-
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 #ifndef PLATFORM_LIBS_H
 #define PLATFORM_LIBS_H
 /*
@@ -54,11 +53,11 @@ bail:
 libraryB does not need to appear in the platform library list.
 */
 
-#include <stdint.h>
+#include <stdatomic.h>
 
 struct platform_lib {
   const char* name;
-  uint32_t uRefs;
+  atomic_uint uRefs;
   int nErr;
   int (*init)(void);
   void (*deinit)(void);

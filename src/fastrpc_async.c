@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef VERIFY_PRINT_ERROR
 #define VERIFY_PRINT_ERROR
@@ -46,7 +46,7 @@ struct fastrpc_async {
 struct fastrpc_async_job_node {
   QNode qn;
   fastrpc_async_descriptor_t async_desc;
-  boolean isjobdone;
+  bool isjobdone;
   struct pollfd pfd;
   int result;
 };
@@ -64,19 +64,19 @@ int fastrpc_search_async_job(fastrpc_async_jobid jobid,
   int domain, hash;
   struct fastrpc_async *me = NULL;
   QNode *pn, *pnn;
-  boolean jobfound = FALSE;
+  bool jobfound = false;
   struct fastrpc_async_job_node *lasync_node;
 
   domain = GET_DOMAIN_FROM_JOBID(jobid);
   hash = GET_HASH_FROM_JOBID(jobid);
-  VERIFYC((domain >= 0) && (domain < NUM_DOMAINS_EXTEND), AEE_EBADPARM);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADPARM);
   me = &lasyncinfo[domain];
   VERIFYC(me->init_done == 1, AEE_EBADPARM);
   pthread_mutex_lock(&me->mut);
   QLIST_NEXTSAFE_FOR_ALL(&me->ql[hash], pn, pnn) {
     lasync_node = STD_RECOVER_REC(struct fastrpc_async_job_node, qn, pn);
     if (lasync_node->async_desc.jobid == jobid) {
-      jobfound = TRUE;
+      jobfound = true;
       break;
     }
   }
@@ -140,7 +140,7 @@ bail:
 }
 
 int fastrpc_remove_async_job(fastrpc_async_jobid jobid,
-                             boolean dsp_invoke_done) {
+                             bool dsp_invoke_done) {
   int nErr = AEE_SUCCESS;
   struct fastrpc_async *me = NULL;
   struct fastrpc_async_job_node *lasync_node = NULL;
@@ -174,7 +174,7 @@ bail:
 }
 
 int fastrpc_release_async_job(fastrpc_async_jobid jobid) {
-  return fastrpc_remove_async_job(jobid, TRUE);
+  return fastrpc_remove_async_job(jobid, true);
 }
 
 int fastrpc_save_async_job(int domain, struct fastrpc_async_job *async_job,
@@ -191,7 +191,7 @@ int fastrpc_save_async_job(int domain, struct fastrpc_async_job *async_job,
   lasync_job->async_desc.type = desc->type;
   lasync_job->async_desc.cb.fn = desc->cb.fn;
   lasync_job->async_desc.cb.context = desc->cb.context;
-  lasync_job->isjobdone = FALSE;
+  lasync_job->isjobdone = false;
   lasync_job->result = -1;
   lasync_job->pfd.fd = -1;
   hash = GET_HASH_FROM_JOBID(lasync_job->async_desc.jobid);
@@ -258,7 +258,7 @@ static void *async_fastrpc_thread(void *arg) {
   QNode *pn, *pnn;
 
   int hash = -1;
-  boolean isjobfound = FALSE;
+  bool isjobfound = false;
 
   /// TODO: Do we really need this line?
   set_thread_context(domain);
@@ -269,15 +269,15 @@ static void *async_fastrpc_thread(void *arg) {
          "adsprpc: %s received async response for jobid 0x%" PRIx64
          " and result 0x%x",
          __func__, jobid, result);
-    isjobfound = FALSE;
+    isjobfound = false;
     hash = GET_HASH_FROM_JOBID(jobid);
     pthread_mutex_lock(&me->mut);
     QLIST_NEXTSAFE_FOR_ALL(&me->ql[hash], pn, pnn) {
       lasync_node = STD_RECOVER_REC(struct fastrpc_async_job_node, qn, pn);
       if (lasync_node->async_desc.jobid == jobid) {
-        lasync_node->isjobdone = TRUE;
+        lasync_node->isjobdone = true;
         lasync_node->result = result;
-        isjobfound = TRUE;
+        isjobfound = true;
         switch (lasync_node->async_desc.type) {
         case FASTRPC_ASYNC_NO_SYNC:
           FARF(RUNTIME_RPC_HIGH,
@@ -419,7 +419,7 @@ static int get_remote_async_response(int domain, fastrpc_async_jobid *jobid,
   remote_handle handle = -1;
   uint32_t sc = 0;
 
-  VERIFYC(domain < NUM_DOMAINS_EXTEND, AEE_EBADPARM);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADPARM);
   VERIFY(AEE_SUCCESS == (nErr = fastrpc_session_dev(domain, &dev)));
   VERIFYM(-1 != dev, AEE_ERPC, "open dev failed\n");
   if (is_kernel_perf_enabled()) {

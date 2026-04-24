@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 
 #ifndef HAP_DEBUG_H
 #define HAP_DEBUG_H
@@ -77,8 +77,8 @@ Returns
     FALSE if there is no space left in the buffers.
 
 */
-boolean HAP_log_data_packet(unsigned short log_code_type, unsigned int dataLen,
-                    byte* data);
+bool HAP_log_data_packet(unsigned short log_code_type, unsigned int dataLen,
+                    unsigned char* data);
 
 #define HAP_DEBUG_TRACEME 0
 

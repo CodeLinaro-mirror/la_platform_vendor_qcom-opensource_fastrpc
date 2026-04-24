@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 
 #ifndef FASTRPC_MEM_H
 #define FASTRPC_MEM_H
@@ -54,5 +54,23 @@ int remote_mmap64_internal(int fd, uint32_t flags, uint64_t vaddrin, int64_t siz
  *         - AEE_ENOSUCHMAP: Unknown FD
 */
 int fastrpc_buffer_ref(int domain, int fd, int ref, void **va, size_t *size);
+
+
+/*
+ * Register or deregister a buffer with fastrpc framework, managing its reference count
+ * and associated metadata.
+ *
+ * @param buf Pointer to the buffer to be registered or deregistered
+ * @param size Size of the buffer in bytes
+ * @param fd File descriptor associated with the buffer; use -1 to deregister
+
+ * This function internally calls `remote_register_buf_common` with default attributes.
+ * - If `fd` is not -1, the buffer is registered and its reference count is incremented.
+ * - If `fd` is -1, the buffer is deregistered and its reference count is decremented.
+ *   If the reference count reaches zero, the buffer is unmapped and its metadata is freed.
+ *
+ * @return void
+ */
+void remote_register_buf(void *buf, int size, int fd);
 
 #endif //FASTRPC_MEM_H

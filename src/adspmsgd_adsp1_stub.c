@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 
 #ifndef _ADSPMSGD_ADSP1_STUB_H
 #define _ADSPMSGD_ADSP1_STUB_H
@@ -338,7 +338,7 @@ struct SequenceType {
    uint32_t               routSizePrimROut;
 };
 
-//byte offset from the start of the case values for
+//unsigned char offset from the start of the case values for
 //this unions case value array.  it MUST be aligned
 //at the alignment requrements for the descriptor
 //
@@ -489,7 +489,7 @@ static __inline int _stub_method_1(remote_handle64 _handle, uint32_t _mid, uint3
    _CATCH(_nErr) {}
    return _nErr;
 }
-__QAIC_STUB_EXPORT int __QAIC_STUB(adspmsgd_adsp1_init3)(remote_handle64 _handle, int heapid, uint32 ion_flags, uint32 filter, uint64 buf_size, uint64* buff_addr) __QAIC_STUB_ATTRIBUTE {
+__QAIC_STUB_EXPORT int __QAIC_STUB(adspmsgd_adsp1_init3)(remote_handle64 _handle, int heapid, uint32_t ion_flags, uint32_t filter, uint64_t buf_size, uint64_t* buff_addr) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 4;
    return _stub_method_1(_handle, _mid, (uint32_t*)&heapid, (uint32_t*)&ion_flags, (uint32_t*)&filter, (uint64_t*)&buf_size, (uint64_t*)buff_addr);
 }
@@ -506,7 +506,7 @@ static __inline int _stub_method_2(remote_handle64 _handle, uint32_t _mid, uint6
    _CATCH(_nErr) {}
    return _nErr;
 }
-__QAIC_STUB_EXPORT int __QAIC_STUB(adspmsgd_adsp1_wait)(remote_handle64 _handle, uint64* bytes_to_read) __QAIC_STUB_ATTRIBUTE {
+__QAIC_STUB_EXPORT int __QAIC_STUB(adspmsgd_adsp1_wait)(remote_handle64 _handle, uint64_t* bytes_to_read) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 5;
    return _stub_method_2(_handle, _mid, (uint64_t*)bytes_to_read);
 }

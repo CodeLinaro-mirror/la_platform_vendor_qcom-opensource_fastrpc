@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause 
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 /* File only compiled  when support to upstream kernel is required*/
 
@@ -22,7 +22,7 @@ int is_async_fastrpc_supported(void) {
  */
 const char *get_secure_domain_name(int domain_id) {
   const char *name;
-  int domain = domain_id & DOMAIN_ID_MASK;
+  int domain = GET_DOMAIN_FROM_EFFEC_DOMAIN_ID(domain_id);
 
   switch (domain) {
   case ADSP_DOMAIN_ID:
@@ -37,6 +37,15 @@ const char *get_secure_domain_name(int domain_id) {
   case CDSP_DOMAIN_ID:
     name = CDSPRPC_SECURE_DEVICE;
     break;
+  case CDSP1_DOMAIN_ID:
+    name = CDSP1RPC_SECURE_DEVICE;
+    break;
+  case GDSP0_DOMAIN_ID:
+    name = GDSP0RPC_SECURE_DEVICE;
+    break;
+  case GDSP1_DOMAIN_ID:
+    name = GDSP1RPC_SECURE_DEVICE;
+    break;
   default:
     name = DEFAULT_DEVICE;
     break;
@@ -44,7 +53,7 @@ const char *get_secure_domain_name(int domain_id) {
   return name;
 }
 
-int ioctl_init(int dev, uint32_t flags, int attr, byte *shell, int shelllen,
+int ioctl_init(int dev, uint32_t flags, int attr, unsigned char *shell, int shelllen,
                int shellfd, char *mem, int memlen, int memfd, int tessiglen) {
   int ioErr = 0;
   struct fastrpc_ioctl_init_create init = {0};
@@ -181,12 +190,8 @@ int ioctl_getdspinfo(int dev, int domain, uint32_t attr, uint32_t *capability) {
   int ioErr = AEE_SUCCESS;
   static struct fastrpc_ioctl_capability cap = {0};
 
-  if (attr == PERF_V2_DRIVER_SUPPORT) {
-    *capability = 2;
-    return 0;
-  }
-  if (attr > PERF_V2_DRIVER_SUPPORT && attr < FASTRPC_MAX_ATTRIBUTES) {
-    *capability = 1;
+  if (attr >= PERF_V2_DRIVER_SUPPORT && attr < FASTRPC_MAX_ATTRIBUTES) {
+    *capability = 0;
     return 0;
   }
 
@@ -199,6 +204,9 @@ int ioctl_getdspinfo(int dev, int domain, uint32_t attr, uint32_t *capability) {
 }
 
 int ioctl_setmode(int dev, int mode) {
+  if (mode == FASTRPC_SESSION_ID1)
+    return AEE_SUCCESS;
+
   return AEE_EUNSUPPORTED;
 }
 
@@ -241,4 +249,11 @@ int ioctl_session_info(int dev, struct fastrpc_proc_sess_info *sess_info) {
 
 int ioctl_optimization(int dev, uint32_t max_concurrency) {
   return AEE_EUNSUPPORTED;
+}
+
+int ioctl_mdctx_manage(int dev, int req, void *user_ctx,
+	unsigned int *domain_ids, unsigned int num_domain_ids, uint64_t *ctx)
+{
+	// TODO: Implement this for opensource
+	return AEE_EUNSUPPORTED;
 }

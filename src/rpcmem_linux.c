@@ -47,8 +47,10 @@
 #include "HAP_farf.h"
 #include "apps_std.h"
 #include "fastrpc_common.h"
+#include "fastrpc_ioctl.h"
 #include "rpcmem.h"
 #include "verify.h"
+#include "fastrpc_mem.h"
 
 #define PAGE_SIZE 4096
 
@@ -68,6 +70,7 @@ struct dma_heap_allocation_data {
   _IOWR(DMA_HEAP_IOC_MAGIC, 0x0, struct dma_heap_allocation_data)
 #define DMA_HEAP_NAME "/dev/dma_heap/system"
 static int dmafd = -1;
+static int rpcfd = -1;
 static QList rpclst;
 static pthread_mutex_t rpcmt;
 struct rpc_info {
@@ -92,7 +95,15 @@ void rpcmem_init() {
 
   dmafd = open(DMA_HEAP_NAME, O_RDONLY | O_CLOEXEC);
   if (dmafd < 0) {
-    FARF(ERROR, "Error %d: Unable to open %s\n", errno, DMA_HEAP_NAME);
+    FARF(ALWAYS, "Warning %d: Unable to open %s, falling back to fastrpc ioctl\n", errno, DMA_HEAP_NAME);
+    /*
+     * Application should link proper library as DEFAULT_DOMAIN_ID
+     * is used to open rpc device node and not the uri passed by
+     * user.
+     */
+    rpcfd = open_device_node(DEFAULT_DOMAIN_ID);
+    if (rpcfd < 0)
+      FARF(ALWAYS, "Warning %d: Unable to open fastrpc dev node for domain: %d\n", errno, DEFAULT_DOMAIN_ID);
   }
   pthread_mutex_unlock(&rpcmt);
 }
@@ -101,8 +112,16 @@ void rpcmem_deinit() {
   pthread_mutex_lock(&rpcmt);
   if (dmafd != -1)
     close(dmafd);
+  if (rpcfd != -1)
+    close(rpcfd);
   pthread_mutex_unlock(&rpcmt);
   pthread_mutex_destroy(&rpcmt);
+}
+
+int rpcmem_set_dmabuf_name(const char *name, int fd, int heapid,
+			void *buf, uint32_t rpcflags) {
+        // Dummy call where DMABUF is not used
+        return 0;
 }
 
 int rpcmem_to_fd_internal(void *po) {
@@ -127,30 +146,54 @@ int rpcmem_to_fd_internal(void *po) {
 
 int rpcmem_to_fd(void *po) { return rpcmem_to_fd_internal(po); }
 
-void *rpcmem_alloc_internal(int heapid, uint32 flags, size_t size) {
+void *rpcmem_alloc_internal(int heapid, uint32_t flags, size_t size) {
   struct rpc_info *rinfo;
-  int nErr = 0;
+  int nErr = 0, fd = -1;
   struct dma_heap_allocation_data dmabuf = {
       .len = size,
       .fd_flags = O_RDWR | O_CLOEXEC,
   };
 
-  if (dmafd == -1 || size <= 0)
+  if ((dmafd == -1 && rpcfd == -1) || size <= 0) {
+    FARF(ERROR,
+           "Error: Unable to allocate memory dmaheap fd %d, rpcfd %d, size "
+           "%zu, flags %u",
+           dmafd, rpcfd, size, flags);
     return NULL;
+  }
 
   VERIFY(0 != (rinfo = calloc(1, sizeof(*rinfo))));
 
-  nErr = ioctl(dmafd, DMA_HEAP_IOCTL_ALLOC, &dmabuf);
-  if (nErr) {
-    FARF(ERROR,
-         "Error %d: Unable to allocate memory dmaheap fd %d, heapid %d, size "
-         "%zu, flags %u",
-         errno, dmafd, heapid, size, flags);
-    goto bail;
+  if (dmafd != -1) {
+    nErr = ioctl(dmafd, DMA_HEAP_IOCTL_ALLOC, &dmabuf);
+    if (nErr) {
+      FARF(ERROR,
+           "Error %d: Unable to allocate memory dmaheap fd %d, heapid %d, size "
+           "%zu, flags %u",
+           errno, dmafd, heapid, size, flags);
+      goto bail;
+    }
+    fd = dmabuf.fd;
+  } else {
+    struct fastrpc_ioctl_alloc_dma_buf buf;
+
+    buf.size = size + PAGE_SIZE;
+    buf.fd = -1;
+    buf.flags = 0;
+
+    nErr = ioctl(rpcfd, FASTRPC_IOCTL_ALLOC_DMA_BUFF, (unsigned long)&buf);
+    if (nErr) {
+      FARF(ERROR,
+           "Error %d: Unable to allocate memory fastrpc fd %d, heapid %d, size "
+           "%zu, flags %u",
+           errno, rpcfd, heapid, size, flags);
+      goto bail;
+    }
+    fd = buf.fd;
   }
   VERIFY(0 != (rinfo->buf = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED,
-                                 dmabuf.fd, 0)));
-  rinfo->fd = dmabuf.fd;
+                                 fd, 0)));
+  rinfo->fd = fd;
   rinfo->aligned_buf =
       (void *)(((uintptr_t)rinfo->buf /*+ PAGE_SIZE*/) & PAGE_MASK);
   rinfo->aligned_buf = rinfo->buf;
@@ -160,6 +203,7 @@ void *rpcmem_alloc_internal(int heapid, uint32 flags, size_t size) {
   pthread_mutex_unlock(&rpcmt);
   FARF(RUNTIME_RPC_HIGH, "Allocted memory from DMA heap fd %d ptr %p orig ptr %p\n",
        rinfo->fd, rinfo->aligned_buf, rinfo->buf);
+  remote_register_buf(rinfo->buf, rinfo->size, rinfo->fd);
   return rinfo->aligned_buf;
 bail:
   if (nErr) {
@@ -188,6 +232,7 @@ void rpcmem_free_internal(void *po) {
   }
   pthread_mutex_unlock(&rpcmt);
   if (rfree) {
+    remote_register_buf(rfree->buf, rfree->size, -1);
     munmap(rfree->buf, rfree->size);
     close(rfree->fd);
     free(rfree);
@@ -197,7 +242,7 @@ void rpcmem_free_internal(void *po) {
 
 void rpcmem_free(void *po) { rpcmem_free_internal(po); }
 
-void *rpcmem_alloc(int heapid, uint32 flags, int size) {
+void *rpcmem_alloc(int heapid, uint32_t flags, int size) {
   return rpcmem_alloc_internal(heapid, flags, size);
 }
 

@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear
 
 #ifndef MUTEX_H
 #define MUTEX_H
@@ -43,7 +43,7 @@
 
 #include "AEEstd.h"
 
-#define RW_MUTEX_T uint32
+#define RW_MUTEX_T uint32_t
 #define RW_MUTEX_CTOR(mut) mut = 0
 #define RW_MUTEX_LOCK_READ(mut) \
    do {\

@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef __APPS_STD_INTERNAL_H__
 #define __APPS_STD_INTERNAL_H__
@@ -19,23 +19,8 @@
 #define ADSP_LIBRARY_PATH "ADSP_LIBRARY_PATH"
 #define DSP_LIBRARY_PATH "DSP_LIBRARY_PATH"
 #define ADSP_AVS_PATH "ADSP_AVS_CFG_PATH"
-
-// Locations where shell file can be found
-#ifndef ENABLE_UPSTREAM_DRIVER_INTERFACE
-#ifndef DSP_MOUNT_LOCATION
-#define DSP_MOUNT_LOCATION "/dsp/"
-#endif
-#ifndef DSP_DOM_LOCATION
-#define DSP_DOM_LOCATION "/dsp/xdsp"
-#endif
-#else /* ENABLE_UPSTREAM_DRIVER_INTERFACE */
-#ifndef DSP_MOUNT_LOCATION
-#define DSP_MOUNT_LOCATION "/usr/lib/dsp/"
-#endif
-#ifndef DSP_DOM_LOCATION
-#define DSP_DOM_LOCATION "/usr/lib/dsp/xdsp"
-#endif
-#endif /* ENABLE_UPSTREAM_DRIVER_INTERFACE */
+#define MAX_NON_PRELOAD_LIBS_LEN 2048
+#define FILE_EXT ".so"
 
 #ifndef VENDOR_DSP_LOCATION
 #define VENDOR_DSP_LOCATION "/vendor/dsp/"
@@ -44,14 +29,12 @@
 #define VENDOR_DOM_LOCATION "/vendor/dsp/xdsp/"
 #endif
 
-// Search path used by fastRPC to search skel library, .debugconfig and .farf files
-#ifndef DSP_SEARCH_PATH
-#define DSP_SEARCH_PATH ";/usr/lib/rfsa/adsp;/vendor/lib/rfsa/adsp;"
-#endif
-
 // Search path used by fastRPC for acdb path
 #ifndef ADSP_AVS_CFG_PATH
 #define ADSP_AVS_CFG_PATH ";/etc/acdbdata/;"
 #endif
+
+int fopen_from_dirlist(const char *dirList, const char *delim, 
+    const char *mode, const char *name, apps_std_FILE *psout);
 
 #endif /*__APPS_STD_INTERNAL_H__*/

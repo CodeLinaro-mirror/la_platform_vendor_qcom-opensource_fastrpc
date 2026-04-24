@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef VERIFY_PRINT_ERROR
 #define VERIFY_PRINT_ERROR
@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include "fastrpc_hash_table.h"
 
 #define ADSP_MMAP_HEAP_ADDR 4
 #define ADSP_MMAP_REMOTE_HEAP_ADDR 8
@@ -30,18 +31,34 @@
 #define FASTRPC_ALLOC_HLOS_FD                                                  \
   0x10000 /* Flag to allocate HLOS FD to be shared with DSP */
 
-static QList memlst[NUM_DOMAINS_EXTEND];
-static pthread_mutex_t memmt[NUM_DOMAINS_EXTEND];
-int mem_init_flag[NUM_DOMAINS_EXTEND];
+typedef struct {
+	QList mem_list;
+	pthread_mutex_t mem_mut;
+	int init;
+	ADD_DOMAIN_HASH();
+} apps_mem_info;
+
+DECLARE_HASH_TABLE(apps_mem, apps_mem_info);
 
 struct mem_info {
   QNode qn;
-  uint64 vapps;
-  uint64 vadsp;
-  int32 size;
-  int32 mapped;
-  uint32 rflags;
+  uint64_t vapps;
+  uint64_t vadsp;
+  int32_t size;
+  int32_t mapped;
+  uint32_t rflags;
 };
+
+/* Delete and free all nodes in hash-table */
+void apps_mem_table_deinit(void) {
+	HASH_TABLE_CLEANUP(apps_mem_info);
+}
+
+/* Initialize hash-table */
+int apps_mem_table_init(void) {
+	HASH_TABLE_INIT(apps_mem_info);
+	return 0;
+}
 
 /*
 These should be called in some static constructor of the .so that
@@ -52,16 +69,33 @@ the order of when constructors are called.
 */
 
 int apps_mem_init(int domain) {
-  QList_Ctor(&memlst[domain]);
-  pthread_mutex_init(&memmt[domain], 0);
-  mem_init_flag[domain] = 1;
-  return AEE_SUCCESS;
+  int nErr = AEE_SUCCESS;
+  apps_mem_info *me = NULL;
+
+  GET_HASH_NODE(apps_mem_info, domain, me);
+  if (!me) {
+    ALLOC_AND_ADD_NEW_NODE_TO_TABLE(apps_mem_info, domain, me);
+  }
+  QList_Ctor(&me->mem_list);
+  pthread_mutex_init(&me->mem_mut, 0);
+  me->init = 1;
+bail:
+	return nErr;
 }
 
 void apps_mem_deinit(int domain) {
   QNode *pn;
-  if (mem_init_flag[domain]) {
-    while ((pn = QList_PopZ(&memlst[domain])) != NULL) {
+  apps_mem_info *me = NULL;
+
+  GET_HASH_NODE(apps_mem_info, domain, me);
+  if (!me) {
+    FARF(ALWAYS, "Warning: %s: unable to find hash-node for domain %d",
+          __func__, domain);
+    return;
+  }
+
+  if (me->init) {
+    while ((pn = QList_PopZ(&me->mem_list)) != NULL) {
       struct mem_info *mfree = STD_RECOVER_REC(struct mem_info, qn, pn);
       if (mfree->vapps) {
         if (mfree->mapped) {
@@ -73,22 +107,25 @@ void apps_mem_deinit(int domain) {
       free(mfree);
       mfree = NULL;
     }
-    pthread_mutex_destroy(&memmt[domain]);
-    mem_init_flag[domain] = 0;
+    pthread_mutex_destroy(&me->mem_mut);
+    me->init = 0;
   }
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_mem_request_map64)(int heapid, uint32 lflags, uint32 rflags,
-                                    uint64 vin, int64 len, uint64 *vapps,
-                                    uint64 *vadsp) __QAIC_IMPL_ATTRIBUTE {
+__QAIC_IMPL(apps_mem_request_map64)(int heapid, uint32_t lflags, uint32_t rflags,
+                                    uint64_t vin, int64_t len, uint64_t *vapps,
+                                    uint64_t *vadsp) __QAIC_IMPL_ATTRIBUTE {
   struct mem_info *minfo = 0;
   int nErr = 0, unsigned_module = 0, ualloc_support = 0;
   void *buf = 0;
   uint64_t pbuf;
   int fd = -1;
   int domain = get_current_domain();
+  apps_mem_info *me = NULL;
 
+  GET_HASH_NODE(apps_mem_info, domain, me);
+  VERIFYC(me, AEE_ERESOURCENOTFOUND);
   VERIFY(AEE_SUCCESS ==
          (nErr = get_unsigned_pd_attribute(domain, &unsigned_module)));
   FASTRPC_ATRACE_BEGIN_L("%s called with rflag 0x%x, lflags 0x%x, len 0x%llx, "
@@ -112,7 +149,7 @@ __QAIC_IMPL(apps_mem_request_map64)(int heapid, uint32 lflags, uint32 rflags,
     VERIFYC(NULL != (buf = rpcmem_alloc_internal(heapid, lflags, len)),
             AEE_ENORPCMEMORY);
     VERIFYC(0 < (fd = rpcmem_to_fd_internal(buf)), AEE_EBADFD);
-
+    rpcmem_set_dmabuf_name("dsp", fd, heapid, buf, lflags);
     /* Using FASTRPC_MAP_FD_DELAYED as only HLOS mapping is reqd at this point
      */
     VERIFY(AEE_SUCCESS == (nErr = fastrpc_mmap(domain, fd, buf, 0, len,
@@ -125,7 +162,7 @@ __QAIC_IMPL(apps_mem_request_map64)(int heapid, uint32 lflags, uint32 rflags,
      * fd here will act as the unique key between the memory mapped
      * on HLOS and DSP.
      */
-    *vadsp = (uint64)fd;
+    *vadsp = (uint64_t)fd;
   } else {
     /* Memory for unsignedPD's user-heap will be allocated in userspace for
      * security reasons. Memory for signedPD's user-heap will be allocated in
@@ -135,12 +172,12 @@ __QAIC_IMPL(apps_mem_request_map64)(int heapid, uint32 lflags, uint32 rflags,
          (rflags != ADSP_MMAP_ADD_PAGES_LLC)) ||
         (((rflags == ADSP_MMAP_ADD_PAGES) ||
           (rflags == ADSP_MMAP_ADD_PAGES_LLC)) &&
-         (!is_kernel_alloc_supported(-1, -1) ||
-          (unsigned_module && ualloc_support)))) {
+         (unsigned_module && ualloc_support))) {
       VERIFYC(NULL != (buf = rpcmem_alloc_internal(heapid, lflags, len)),
               AEE_ENORPCMEMORY);
       fd = rpcmem_to_fd_internal(buf);
       VERIFYC(fd > 0, AEE_EBADPARM);
+      rpcmem_set_dmabuf_name("dsp", fd, heapid, buf, lflags);
     }
     VERIFY(AEE_SUCCESS ==
            (nErr = remote_mmap64_internal(fd, rflags, (uint64_t)buf, len,
@@ -153,9 +190,9 @@ __QAIC_IMPL(apps_mem_request_map64)(int heapid, uint32 lflags, uint32 rflags,
   minfo->size = len;
   minfo->mapped = 0;
   minfo->rflags = rflags;
-  pthread_mutex_lock(&memmt[domain]);
-  QList_AppendNode(&memlst[domain], &minfo->qn);
-  pthread_mutex_unlock(&memmt[domain]);
+  pthread_mutex_lock(&me->mem_mut);
+  QList_AppendNode(&me->mem_list, &minfo->qn);
+  pthread_mutex_unlock(&me->mem_mut);
 bail:
   if (nErr) {
     if (buf) {
@@ -175,56 +212,66 @@ bail:
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_mem_request_map)(int heapid, uint32 lflags, uint32 rflags,
-                                  uint32 vin, int32 len, uint32 *vapps,
-                                  uint32 *vadsp) __QAIC_IMPL_ATTRIBUTE {
-  uint64 vin1, vapps1, vadsp1;
-  int64 len1;
+__QAIC_IMPL(apps_mem_request_map)(int heapid, uint32_t lflags, uint32_t rflags,
+                                  uint32_t vin, int32_t len, uint32_t *vapps,
+                                  uint32_t *vadsp) __QAIC_IMPL_ATTRIBUTE {
+  uint64_t vin1, vapps1, vadsp1;
+  int64_t len1;
   int nErr = AEE_SUCCESS;
-  vin1 = (uint64)vin;
-  len1 = (int64)len;
+  vin1 = (uint64_t)vin;
+  len1 = (int64_t)len;
   nErr = apps_mem_request_map64(heapid, lflags, rflags, vin1, len1, &vapps1,
                                 &vadsp1);
-  *vapps = (uint32)vapps1;
-  *vadsp = (uint32)vadsp1;
+  *vapps = (uint32_t)vapps1;
+  *vadsp = (uint32_t)vadsp1;
   return nErr;
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_mem_request_unmap64)(uint64 vadsp,
-                                      int64 len) __QAIC_IMPL_ATTRIBUTE {
+__QAIC_IMPL(apps_mem_request_unmap64)(uint64_t vadsp,
+                                      int64_t len) __QAIC_IMPL_ATTRIBUTE {
   int nErr = AEE_SUCCESS, fd = -1;
   struct mem_info *minfo, *mfree = 0;
   QNode *pn, *pnn;
   int domain = get_current_domain();
+  apps_mem_info *me = NULL;
 
   FASTRPC_ATRACE_BEGIN_L("%s called with vadsp 0x%llx, len 0x%llx", __func__,
                          vadsp, len);
-  pthread_mutex_lock(&memmt[domain]);
-  QLIST_NEXTSAFE_FOR_ALL(&memlst[domain], pn, pnn) {
+  GET_HASH_NODE(apps_mem_info, domain, me);
+  VERIFYC(me, AEE_ERESOURCENOTFOUND);
+
+  pthread_mutex_lock(&me->mem_mut);
+  QLIST_NEXTSAFE_FOR_ALL(&me->mem_list, pn, pnn) {
     minfo = STD_RECOVER_REC(struct mem_info, qn, pn);
     if (minfo->vadsp == vadsp) {
       mfree = minfo;
       break;
     }
   }
-  pthread_mutex_unlock(&memmt[domain]);
-  VERIFYC(mfree, AEE_ENOSUCHMAP);
+  pthread_mutex_unlock(&me->mem_mut);
 
   /* If apps_mem_request_map64 was called with flag FASTRPC_ALLOC_HLOS_FD,
    * use fastrpc_munmap else use remote_munmap64 to unmap.
    */
-  if (mfree->rflags == FASTRPC_ALLOC_HLOS_FD) {
-    fd = (int)vadsp;
-    VERIFY(AEE_SUCCESS == (nErr = fastrpc_munmap(domain, fd, 0, len)));
-  } else {
-    VERIFY(AEE_SUCCESS == (nErr = remote_munmap64((uint64_t)vadsp, len)));
-  }
+   if(mfree && mfree->rflags == FASTRPC_ALLOC_HLOS_FD) {
+      fd = (int)vadsp;
+      VERIFY(AEE_SUCCESS == (nErr = fastrpc_munmap(domain, fd, 0, len)));
+   } else if (mfree || fastrpc_get_pd_type(domain) == AUDIO_STATICPD){
+      /*
+       * Map info not available for Audio static PD after daemon reconnect,
+       * So continue to unmap to avoid driver global maps leak.
+       */
+      VERIFY(AEE_SUCCESS == (nErr = remote_munmap64((uint64_t)vadsp, len)));
+      if (!mfree)
+         goto bail;
+   }
+   VERIFYC(mfree, AEE_ENOSUCHMAP);
 
   /* Dequeue done after unmap to prevent leaks in case unmap fails */
-  pthread_mutex_lock(&memmt[domain]);
+  pthread_mutex_lock(&me->mem_mut);
   QNode_Dequeue(&mfree->qn);
-  pthread_mutex_unlock(&memmt[domain]);
+  pthread_mutex_unlock(&me->mem_mut);
 
   if (mfree->mapped) {
     munmap((void *)(uintptr_t)mfree->vapps, mfree->size);
@@ -245,23 +292,26 @@ bail:
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_mem_request_unmap)(uint32 vadsp,
-                                    int32 len) __QAIC_IMPL_ATTRIBUTE {
-  uint64 vadsp1 = (uint64)vadsp;
-  int64 len1 = (int64)len;
+__QAIC_IMPL(apps_mem_request_unmap)(uint32_t vadsp,
+                                    int32_t len) __QAIC_IMPL_ATTRIBUTE {
+  uint64_t vadsp1 = (uint64_t)vadsp;
+  int64_t len1 = (int64_t)len;
   int nErr = apps_mem_request_unmap64(vadsp1, len1);
   return nErr;
 }
 
 __QAIC_IMPL_EXPORT int
-__QAIC_IMPL(apps_mem_share_map)(int fd, int size, uint64 *vapps,
-                                uint64 *vadsp) __QAIC_IMPL_ATTRIBUTE {
+__QAIC_IMPL(apps_mem_share_map)(int fd, int size, uint64_t *vapps,
+                                uint64_t *vadsp) __QAIC_IMPL_ATTRIBUTE {
   struct mem_info *minfo = 0;
   int nErr = AEE_SUCCESS;
   void *buf = 0;
   uint64_t pbuf;
   int domain = get_current_domain();
+  apps_mem_info *me = NULL;
 
+  GET_HASH_NODE(apps_mem_info, domain, me);
+  VERIFYC(me, AEE_ERESOURCENOTFOUND);
   VERIFYC(fd > 0, AEE_EBADPARM);
   VERIFYC(0 != (minfo = malloc(sizeof(*minfo))), AEE_ENOMEMORY);
   QNode_CtorZ(&minfo->qn);
@@ -277,9 +327,9 @@ __QAIC_IMPL(apps_mem_share_map)(int fd, int size, uint64 *vapps,
   minfo->vadsp = *vadsp;
   minfo->size = size;
   minfo->mapped = 1;
-  pthread_mutex_lock(&memmt[domain]);
-  QList_AppendNode(&memlst[domain], &minfo->qn);
-  pthread_mutex_unlock(&memmt[domain]);
+  pthread_mutex_lock(&me->mem_mut);
+  QList_AppendNode(&me->mem_list, &minfo->qn);
+  pthread_mutex_unlock(&me->mem_mut);
 bail:
   if (nErr) {
     if (buf) {
@@ -296,9 +346,9 @@ bail:
   return nErr;
 }
 
-__QAIC_IMPL_EXPORT int __QAIC_IMPL(apps_mem_share_unmap)(uint64 vadsp, int size)
+__QAIC_IMPL_EXPORT int __QAIC_IMPL(apps_mem_share_unmap)(uint64_t vadsp, int size)
     __QAIC_IMPL_ATTRIBUTE {
-  int64 len1 = (int64)size;
+  int64_t len1 = (int64_t)size;
   int nErr = AEE_SUCCESS;
   nErr = apps_mem_request_unmap64(vadsp, len1);
   if (nErr != AEE_SUCCESS) {

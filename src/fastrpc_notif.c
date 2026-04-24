@@ -1,5 +1,5 @@
-// Copyright (c) 2024, Qualcomm Innovation Center, Inc. All rights reserved.
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause-Clear 
 
 #ifndef VERIFY_PRINT_ERROR
 #define VERIFY_PRINT_ERROR
@@ -28,12 +28,14 @@
 #include "fastrpc_notif.h"
 #include "platform_libs.h"
 #include "verify.h"
+#include "fastrpc_hash_table.h"
 
-struct notif_config {
+typedef struct {
   pthread_t thread;
   int init_done;
   int deinit_started;
-};
+  ADD_DOMAIN_HASH();
+} notif_config;
 
 // Fastrpc client notification request node to be queued to <notif_list>
 struct fastrpc_notif {
@@ -47,15 +49,16 @@ struct other_handle_list {                   // For non-domain and reverse handl
 
 /* Mutex to protect notif_list */
 static pthread_mutex_t update_notif_list_mut;
-static struct notif_config lnotifinfo[NUM_DOMAINS_EXTEND];
 /* List of all clients who registered for process status notification */
 static struct other_handle_list notif_list;
 
 void fastrpc_cleanup_notif_list();
 
+DECLARE_HASH_TABLE(fastrpc_notif, notif_config);
+
 static void *notif_fastrpc_thread(void *arg) {
-  struct notif_config *me = (struct notif_config *)arg;
-  int nErr = AEE_SUCCESS, domain = (int)(me - &lnotifinfo[0]);
+  notif_config *me = (notif_config *)arg;
+  int nErr = AEE_SUCCESS, domain = me->domain;
 
   do {
     nErr = get_remote_notif_response(domain);
@@ -81,19 +84,27 @@ void notif_thread_exit_handler(int sig) {
 }
 
 void fastrpc_notif_init() {
+  HASH_TABLE_INIT(notif_config);
   QList_Ctor(&notif_list.ql);
   pthread_mutex_init(&update_notif_list_mut, 0);
 }
 
 void fastrpc_notif_deinit() {
+  HASH_TABLE_CLEANUP(notif_config);
   fastrpc_cleanup_notif_list();
   pthread_mutex_destroy(&update_notif_list_mut);
 }
 
 void fastrpc_notif_domain_deinit(int domain) {
-  struct notif_config *me = &lnotifinfo[domain];
+  notif_config *me = NULL;
   int err = 0;
 
+  GET_HASH_NODE(notif_config, domain, me);
+  if (!me) {
+    FARF(RUNTIME_RPC_HIGH, "Warning: %s: unable to find hash-node for domain %d",
+              __func__, domain);
+    return;
+  }
   if (me->thread) {
     FARF(ALWAYS, "%s: Waiting for FastRPC notification worker thread to join",
          __func__);
@@ -111,10 +122,14 @@ void fastrpc_notif_domain_deinit(int domain) {
 }
 
 int fastrpc_notif_domain_init(int domain) {
-  struct notif_config *me = &lnotifinfo[domain];
+  notif_config *me = NULL;
   int nErr = AEE_SUCCESS;
   struct sigaction siga;
 
+  GET_HASH_NODE(notif_config, domain, me);
+  if (!me) {
+    ALLOC_AND_ADD_NEW_NODE_TO_TABLE(notif_config, domain, me);
+  }
   if (me->init_done) {
     goto bail;
   }
@@ -146,7 +161,7 @@ int fastrpc_notif_register(int domain,
   struct fastrpc_notif *lnotif = NULL;
 
   // Initialize fastrpc structures, if in case this is the first call to library
-  VERIFYC((domain >= 0) && (domain < NUM_DOMAINS_EXTEND), AEE_EBADPARM);
+  VERIFYC(IS_VALID_EFFECTIVE_DOMAIN_ID(domain), AEE_EBADPARM);
 
   // Allocate client notification request node
   VERIFYC(NULL != (lnotif = calloc(1, sizeof(struct fastrpc_notif))),
