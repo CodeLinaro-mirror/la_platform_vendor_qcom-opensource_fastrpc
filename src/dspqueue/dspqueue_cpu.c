@@ -37,6 +37,8 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <linux/dma-buf.h>
+#include <sys/ioctl.h>
 
 struct dspqueue {
   unsigned id;
@@ -130,6 +132,34 @@ static void *dspqueue_packet_callback_thread(void *arg);
 #define QUEUE_CACHE_ALIGN 256
 #define CACHE_ALIGN_SIZE(x)                                                    \
   ((x + (QUEUE_CACHE_ALIGN - 1)) & (~(QUEUE_CACHE_ALIGN - 1)))
+
+static inline int dmabuf_sync(int fd, uint64_t flags)
+{
+    struct dma_buf_sync sync = { .flags = flags };
+    int ret = ioctl(fd, DMA_BUF_IOCTL_SYNC, &sync);
+    if (ret)
+        FARF(ERROR, "DMA_BUF_IOCTL_SYNC fd=%d flags=0x%llx failed: %s",
+             fd, (unsigned long long)flags, strerror(errno));
+    return ret;
+}
+
+/* Invalidate CPU cache before reading data written by the DSP */
+static inline void dmabuf_sync_for_cpu(int fd)
+{
+    dmabuf_sync(fd, DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ);
+}
+
+/* Flush (clean) CPU cache after writing data that the DSP will read */
+static inline void dmabuf_sync_for_device(int fd)
+{
+    dmabuf_sync(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_WRITE);
+}
+
+/* Full flush+invalidate — used at buffer creation/destruction boundaries */
+static inline void dmabuf_sync_rw(int fd)
+{
+    dmabuf_sync(fd, DMA_BUF_SYNC_END | DMA_BUF_SYNC_RW);
+}
 
 // Cache maintenance ops. No-op for now - assuming cache coherency.
 // Leave macros in place in case we want to make the buffer non-coherent
@@ -287,6 +317,12 @@ static AEEResult init_domain_queues_locked(int domain) {
                               sizeof(struct dspqueue_process_queue_state),
                               FASTRPC_MAP_FD)) == 0);
   state_mapped = 1;
+  /*
+   * Non-IO-coherent: flush the buffer to DDR before the DSP
+   * maps it.  Without this the DSP may read stale/dirty CPU
+   * cache lines instead of the initialised zeroes.
+   */
+  dmabuf_sync_for_device(dq->state_fd);
   VERIFY((nErr = dspqueue_rpc_init_process_state(dq->dsp_handle,
                                                  dq->state_fd)) == 0);
 
@@ -607,6 +643,12 @@ AEEResult dspqueue_create(int domain, uint32_t flags, uint32_t req_queue_size,
   // post-v1 features. Unfortunately the initial DSP codebase ignores the
   // version and flags...
   q->header->version = UINT32_MAX;
+  /*
+   * Non-IO-coherent: flush the entire shared queue buffer to DDR before
+   * the first RPC so the DSP's cache-invalidate on its side sees the
+   * CPU-initialised header (memset + offsets written above).
+   */
+  dmabuf_sync_for_device(q->user_queue_fd);
   nErr = dspqueue_rpc_create_queue(dq->dsp_handle, q->id, q->user_queue_fd,
                                    queue_count, &q->dsp_id);
   if ((nErr == AEE_EUNSUPPORTED) ||
@@ -619,6 +661,16 @@ AEEResult dspqueue_create(int domain, uint32_t flags, uint32_t req_queue_size,
     if (q->have_driver_signaling) {
       q->header->flags |= DSPQUEUE_HEADER_FLAG_DRIVER_SIGNALING;
     }
+    /*
+     * Ensure all stores to the dspqueue shared memory have completed before
+     * allowing the device to access the queue's memory.
+     */
+    barrier_store();
+    /*
+     * Non-IO-coherent: flush the updated header to DDR so the
+     * DSP reads the final queue configuration on the real create.
+     */
+    dmabuf_sync_for_device(q->user_queue_fd);
     VERIFY((nErr = dspqueue_rpc_create_queue(dq->dsp_handle, q->id,
                                              q->user_queue_fd, queue_count,
                                              &q->dsp_id)) == 0);
@@ -1533,9 +1585,21 @@ AEEResult dspqueue_write_noblock(dspqueue_t queue, uint32_t flags,
   FARF(LOW, "Queue %u req_packet_count %u", (unsigned)q->id,
        (unsigned)q->req_packet_count);
   cache_flush_word(&dq->state->req_packet_count[q->id]);
+  /*
+   * Non-IO-coherent: flush both the user_queue (packet data + write_state)
+   * and the state buffer (req_packet_count) to DDR before signalling the
+   * DSP.
+   */
+  dmabuf_sync_for_device(q->user_queue_fd);
+  dmabuf_sync_for_device(dq->state_fd);
   if (q->have_wait_counts) {
     // Only send a signal if the other end is potentially waiting
     barrier_full();
+    /*
+     * Non-IO-coherent: invalidate to read DSP-updated wait_count from DDR
+     * before deciding whether to send a signal.
+     */
+    dmabuf_sync_for_cpu(q->user_queue_fd);
     cache_invalidate_word(&read_state->wait_count);
     if (read_state->wait_count) {
       FARF(MEDIUM, "%s: Send signal", __func__);
@@ -1628,6 +1692,11 @@ AEEResult dspqueue_write(dspqueue_t queue, uint32_t flags, uint32_t num_buffers,
     // Flag that we're potentially waiting and try again
     atomic_fetch_add(wait_count, 1);
     cache_flush_word(wait_count);
+    /*
+     * Ensure store to wait-count is completed before
+     * checking for space by reading read pointer
+     */
+    barrier_full();
     waiting = 1;
     nErr = dspqueue_write_noblock(queue, flags, num_buffers, buffers,
                                   message_length, message);
@@ -1850,6 +1919,12 @@ AEEResult dspqueue_peek_noblock(dspqueue_t queue, uint32_t *flags,
   pthread_mutex_lock(&q->mutex);
   locked = 1;
 
+  /*
+   * Non-IO-coherent: invalidate user_queue so CPU reads DSP-updated
+   * write_state (position/packet_count) from DDR before peeking.
+   */
+  dmabuf_sync_for_cpu(q->user_queue_fd);
+
   // Check if we have a packet available
   get_queue_state_read(q->header, pq, &qleft, &r, NULL);
   if (qleft < 8) {
@@ -1908,6 +1983,11 @@ AEEResult dspqueue_peek(dspqueue_t queue, uint32_t *flags,
     // Mark that we're potentially waiting and try again
     atomic_fetch_add(wait_count, 1);
     cache_flush_word(wait_count);
+    /*
+     * Ensure store to wait-count is completed before
+     * checking for new packet by reading write pointer
+     */
+    barrier_full();
     waiting = 1;
     nErr = dspqueue_peek_noblock(queue, flags, num_buffers, message_length);
     if (nErr != AEE_EWOULDBLOCK) {
@@ -2015,6 +2095,13 @@ if (q->mdq.is_mdq) {
   pthread_mutex_lock(&q->mutex);
   locked = 1;
 
+  /*
+   * Non-IO-coherent: invalidate the user_queue buffer so the CPU reads
+   * DSP-updated write_state (position, packet_count) and packet data
+   * from DDR rather than from a stale CPU cache line.
+   */
+  dmabuf_sync_for_cpu(q->user_queue_fd);
+
   VERIFYC(q->header->queue_count == q->queue_count, AEE_ERPC);
 
   // Check if we have a packet available
@@ -2068,8 +2155,15 @@ if (q->mdq.is_mdq) {
     FARF(LOW, "Queue %u resp_space_count %u", (unsigned)q->id,
          (unsigned)q->resp_space_count);
     cache_flush_word(&dq->state->resp_space_count[q->id]);
+    /*
+     * Non-IO-coherent: flush user_queue (read_state) and state buffer
+     * (resp_space_count) to DDR so the DSP sees the updated pointers.
+     */
+    dmabuf_sync_for_device(q->user_queue_fd);
+    dmabuf_sync_for_device(dq->state_fd);
     if (q->have_wait_counts) {
       // Only signal if the other end is potentially waiting
+      dmabuf_sync_for_cpu(q->user_queue_fd);
       cache_invalidate_word(&write_state->wait_count);
       if (write_state->wait_count) {
         VERIFY((nErr = send_signal(q, DSPQUEUE_SIGNAL_RESP_SPACE)) ==
@@ -2189,8 +2283,16 @@ if (q->mdq.is_mdq) {
   FARF(LOW, "Queue %u resp_space_count %u", (unsigned)q->id,
        (unsigned)q->resp_space_count);
   cache_flush_word(&dq->state->resp_space_count[q->id]);
+  /*
+   * Non-IO-coherent: flush user_queue (updated read_state) and state
+   * buffer (resp_space_count) to DDR so the DSP sees the consumed-space
+   * update.  Then invalidate before reading DSP-updated wait_count.
+   */
+  dmabuf_sync_for_device(q->user_queue_fd);
+  dmabuf_sync_for_device(dq->state_fd);
   if (q->have_wait_counts) {
     // Only signal if the other end is potentially waiting
+    dmabuf_sync_for_cpu(q->user_queue_fd);
     cache_invalidate_word(&write_state->wait_count);
     if (write_state->wait_count) {
       VERIFY((nErr = send_signal(q, DSPQUEUE_SIGNAL_RESP_SPACE)) ==
@@ -2307,6 +2409,11 @@ AEEResult dspqueue_read(dspqueue_t queue, uint32_t *flags, uint32_t max_buffers,
     // Mark that we're potentially waiting and try again
     atomic_fetch_add(wait_count, 1);
     cache_flush_word(wait_count);
+    /*
+     * Ensure store to wait-count is completed before
+     * checking for new packet by reading write pointer
+     */
+    barrier_full();
     waiting = 1;
     nErr =
         dspqueue_read_noblock(queue, flags, max_buffers, num_buffers, buffers,
@@ -2395,6 +2502,13 @@ AEEResult dspqueue_get_stat(dspqueue_t queue, enum dspqueue_stat stat,
     return dspqueue_multidomain_get_stat(q, stat, value);
 
   pthread_mutex_lock(&q->mutex);
+
+  /*
+   * Non-IO-coherent: invalidate user_queue so all stat reads below
+   * (write_state->packet_count, read_state->packet_count, queue bytes)
+   * see DSP-updated values from DDR.
+   */
+  dmabuf_sync_for_cpu(q->user_queue_fd);
 
   switch (stat) {
   case DSPQUEUE_STAT_EARLY_WAKEUP_WAIT_TIME:
@@ -2603,6 +2717,13 @@ static void *dspqueue_receive_signal_thread(void *arg) {
     // which one and signal it.
     FARF(LOW, "Got signal");
 
+    /*
+     * Non-IO-coherent: invalidate the state buffer so the CPU sees
+     * DSP-updated req_space_count and resp_packet_count from DDR
+     * rather than stale CPU cache lines.  This replaces the no-op
+     * cache_invalidate() calls with a real DMA-BUF sync.
+     */
+    dmabuf_sync_for_cpu(dq->state_fd);
     // Ensure we have visibility into updates from the DSP
     cache_invalidate(dq->state->req_space_count,
                      sizeof(dq->state->req_space_count));
@@ -2666,6 +2787,11 @@ static void *dspqueue_packet_callback_thread(void *arg) {
   while (1) {
     pthread_mutex_lock(&q->packet_mutex);
 
+    /*
+     * Non-IO-coherent: invalidate user_queue so CPU reads DSP-updated
+     * write_state->packet_count from DDR (not stale cache).
+     */
+    dmabuf_sync_for_cpu(q->user_queue_fd);
     // Call the callback if we have any packets we haven't seen yet.
     cache_invalidate_word(&write_state->packet_count);
     if (packet_count != write_state->packet_count) {
@@ -2676,8 +2802,19 @@ static void *dspqueue_packet_callback_thread(void *arg) {
     // Mark we're waiting and call again if we just got more packets
     if (q->have_wait_counts) {
       atomic_fetch_add(wait_count, 1);
+      /*
+       * Non-IO-coherent: flush wait_count update to DDR so DSP sees
+       * CPU is waiting before it decides whether to send a signal.
+       */
       cache_flush_word(wait_count);
+      dmabuf_sync_for_device(q->user_queue_fd);
+    /*
+     * Ensure store to wait-count is completed before
+     * checking for new packet by reading write pointer
+     */
+    barrier_full();
     }
+    dmabuf_sync_for_cpu(q->user_queue_fd);
     cache_invalidate_word(&write_state->packet_count);
     if (packet_count != write_state->packet_count) {
       packet_count = write_state->packet_count;
@@ -2689,6 +2826,11 @@ static void *dspqueue_packet_callback_thread(void *arg) {
     if (nErr == AEE_EINTERRUPTED || nErr == AEE_EBADSTATE) {
       FARF(HIGH, "Queue %u exit callback thread", (unsigned)q->id);
       if (q->have_wait_counts) {
+    /*
+     * Ensure store to wait-count is completed before
+     * checking for new packet by reading write pointer
+     */
+        barrier_full();
         atomic_fetch_sub(wait_count, 1);
         cache_flush_word(wait_count);
       }
@@ -2703,6 +2845,11 @@ static void *dspqueue_packet_callback_thread(void *arg) {
 
     // Mark we aren't waiting right now
     if (q->have_wait_counts) {
+    /*
+     * Ensure store to wait-count is completed before
+     * checking for new packet by reading write pointer
+     */
+      barrier_full();
       atomic_fetch_sub(wait_count, 1);
       cache_flush_word(wait_count);
     }
