@@ -147,7 +147,7 @@ cc_library_shared {
     defaults: ["fastrpc_common_defaults"],
     srcs: [":fastrpc_core_sources"],
     cflags: ["-DDEFAULT_DOMAIN_ID=0",
-      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;/vendor/lib64/rfs/dsp;\""],
 }
 
 // libmdsprpc.so (optional; keep if your target uses mDSP)
@@ -156,7 +156,7 @@ cc_library_shared {
     defaults: ["fastrpc_common_defaults"],
     srcs: [":fastrpc_core_sources"],
     cflags: ["-DDEFAULT_DOMAIN_ID=1",
-      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;/vendor/lib64/rfs/dsp;\""],
 }
 
 // libsdsprpc.so
@@ -165,7 +165,7 @@ cc_library_shared {
     defaults: ["fastrpc_common_defaults"],
     srcs: [":fastrpc_core_sources"],
     cflags: ["-DDEFAULT_DOMAIN_ID=2",
-      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;/vendor/lib64/rfs/dsp;\""],
 }
 
 // libcdsprpc.so
@@ -174,7 +174,7 @@ cc_library_shared {
     defaults: ["fastrpc_common_defaults"],
     srcs: [":fastrpc_core_sources"],
     cflags: ["-DDEFAULT_DOMAIN_ID=3",
-      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;/vendor/lib64/rfs/dsp;\""],
 }
 
 //----------------------------------------------------------
@@ -190,7 +190,7 @@ cc_library_shared {
     srcs: [":fastrpc_default_listener_sources"],
     shared_libs: ["libdl", "liblog", "libadsprpc"],
     cflags: ["-Wall", "-Wextra", "-Wno-error=unused-function",
-      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;/vendor/lib64/rfs/dsp;\""],
     version_script: ":fastrpc_default_listener_version_script",
     sanitize: { integer_overflow: true },
     vendor: true,
@@ -204,7 +204,7 @@ cc_library_shared {
     srcs: [":fastrpc_default_listener_sources"],
     shared_libs: ["libdl", "liblog", "libcdsprpc"],
     cflags: ["-Wall", "-Wextra", "-Wno-error=unused-function",
-      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;/vendor/lib64/rfs/dsp;\""],
     version_script: ":fastrpc_default_listener_version_script",
     sanitize: { integer_overflow: true },
     vendor: true,
@@ -218,7 +218,7 @@ cc_library_shared {
     srcs: [":fastrpc_default_listener_sources"],
     shared_libs: ["libdl", "liblog", "libsdsprpc"],
     cflags: ["-Wall", "-Wextra", "-Wno-error=unused-function",
-      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;\""],
+      "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/lib/rfsa/adsp;/vendor/dsp;/vendor/lib64/rfs/dsp;\""],
     version_script: ":fastrpc_default_listener_version_script",
     sanitize: { integer_overflow: true },
     vendor: true,
