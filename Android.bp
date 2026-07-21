@@ -260,3 +260,10 @@ cc_binary {
         "src/vendor.qti.cdsprpc-service.rc",
     ],
 }
+
+sh_binary {
+    name: "init.cdsprpcd.softsku.sh",
+    src: "src/init.cdsprpcd.softsku.sh",
+    vendor: true,
+    filename: "init.cdsprpcd.softsku.sh",
+}
